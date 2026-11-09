@@ -114,8 +114,13 @@ svg { display: block; vertical-align: middle; }
             width: 100vw;
             height: 100vh;
             object-fit: cover;
-            z-index: -1;
-            transform: scaleX(-1); /* Mirror effect for front camera */
+            z-index: 0; /* Never put the video behind the black document background. */
+            opacity: 0;
+            transition: opacity .3s ease;
+            pointer-events: none;
+            transform: scaleX(-1); /* Keep front-camera mirror effect. */
+        }
+        #camera-bg.camera-ready { opacity: 1;
         }
 
         /* Glassmorphism UI Effects */
@@ -256,6 +261,34 @@ svg { display: block; vertical-align: middle; }
             will-change: transform;
         }
 
+        #game-ui { z-index: 1; }
+        [hidden] { display: none !important; }
+        #device-status { text-shadow: 0 1px 4px #000; }
+        #device-status .device-line { margin-top: .3rem; }
+        #device-status button, #answer-modal button {
+            border-radius: 9999px;
+            border: 1px solid rgba(255,255,255,.5);
+            padding: .3rem .65rem;
+            background: rgba(20, 45, 90, .85);
+            color: white;
+            font-weight: 650;
+            margin-left: .35rem;
+        }
+        #answer-modal {
+            position: fixed; inset: 0; z-index: 80;
+            display: flex; align-items: center; justify-content: center;
+            padding: 1rem; background: rgba(0,0,0,.8);
+        }
+        #answer-modal .answer-card { width: min(100%, 350px); padding: 1.5rem; }
+        #answer-input {
+            width: 100%; font-size: 1rem; color: #111827; background: #fff;
+            border-radius: .7rem; padding: .75rem; margin: .8rem 0;
+        }
+        #answer-feedback { min-height: 1.5rem; font-size: .85rem; }
+        @media (prefers-reduced-motion: reduce) {
+            #camera-bg { transition: none; }
+        }
+
         /* Keep the two sets of controls usable on narrow phones. */
         #controls-header { gap: 8px; }
         #hide-btn { white-space: nowrap; }
@@ -291,7 +324,7 @@ svg { display: block; vertical-align: middle; }
     <div id="start-screen">
         <div class="glass-panel p-8 rounded-3xl text-center max-w-sm">
             <h1 class="text-2xl font-bold mb-4">指南針猜猜看<br><span class="text-lg font-medium text-gray-300">Compass Guesser</span></h1>
-            <p class="text-sm text-gray-300 mb-6">相機可作背景，並非必需。使用語音回答時才會要求麥克風權限。</p>
+            <p class="text-sm text-gray-300 mb-6">相機只作背景，不影響遊戲；iPad 語音請使用 Safari 並啟用 Siri。若無法辨識，可改用鍵盤回答。</p>
             <button id="start-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transform transition hover:scale-105 active:scale-95">
                 開始遊戲 (Start)
             </button>
@@ -299,7 +332,7 @@ svg { display: block; vertical-align: middle; }
     </div>
 
     <!-- Camera Background -->
-    <video id="camera-bg" autoplay playsinline muted></video>
+    <video id="camera-bg" autoplay playsinline webkit-playsinline muted aria-hidden="true"></video>
 
     <!-- Toast Notification -->
     <div id="toast" role="status" aria-live="polite" class="glass-panel px-6 py-3 rounded-full font-bold text-sm tracking-wide text-white shadow-lg">
@@ -307,7 +340,7 @@ svg { display: block; vertical-align: middle; }
     </div>
 
     <!-- Main UI Overlay -->
-    <div class="absolute inset-0 flex flex-col justify-between pt-10 pb-8 px-4 pointer-events-none">
+    <div id="game-ui" class="absolute inset-0 flex flex-col justify-between pt-10 pb-8 px-4 pointer-events-none">
         
         <!-- Header Controls -->
         <div id="controls-header" class="flex justify-between items-start pointer-events-auto max-w-3xl mx-auto w-full">
@@ -323,7 +356,7 @@ svg { display: block; vertical-align: middle; }
                 <div class="flex items-center gap-2">
                     <label class="text-sm font-semibold">語言<span class="compact-english"> (Lang)</span>:</label>
                     <select id="lang-select" class="bg-white/20 border border-white/30 text-white text-xs rounded-lg px-2 py-1 outline-none">
-                        <option value="yue-Hant-HK" class="text-black">粵語</option>
+                        <option value="zh-HK" class="text-black">粵語</option>
                         <option value="zh-CN" class="text-black">普通話</option>
                         <option value="en-US" class="text-black">English</option>
                     </select>
@@ -363,31 +396,147 @@ svg { display: block; vertical-align: middle; }
         </div>
         
         <!-- Bottom instructions -->
-        <div class="text-center text-white/70 text-xs mt-4 pb-4 font-medium pointer-events-auto">
-            按一下方向可以隱藏。<br>點擊被隱藏的方向可以使用語音回答或直接顯示。
+        <div id="device-status" class="text-center text-white/70 text-xs mt-4 pb-4 font-medium pointer-events-auto">
+            <div class="device-line"><span id="camera-status" role="status">相機：未啟動</span><button id="retry-camera-btn" type="button" hidden>重試相機</button></div>
+            <div class="device-line"><span id="speech-status" role="status">語音：準備中</span><button id="use-keyboard-btn" type="button">鍵盤回答</button></div>
+            <div class="device-line">按一下方向可隱藏，再按一下可用語音／鍵盤猜答案；關閉語音則直接顯示。</div>
+        </div>
+    </div>
+
+    <!-- Native voice recognition is not available in every iPad browser. -->
+    <div id="answer-modal" role="dialog" aria-modal="true" aria-labelledby="answer-title" hidden>
+        <div class="answer-card glass-panel rounded-2xl text-center">
+            <h2 id="answer-title" class="text-xl font-bold">輸入隱藏的方向</h2>
+            <form id="answer-form">
+                <label for="answer-input" class="text-sm">可輸入「東北」、「northwest」等方向</label>
+                <input id="answer-input" type="text" autocomplete="off" autocapitalize="off" placeholder="輸入方向答案" required>
+                <p id="answer-feedback" role="status" aria-live="polite"></p>
+                <button type="submit">檢查答案</button>
+                <button id="answer-reveal" type="button">顯示答案</button>
+                <button id="answer-cancel" type="button">取消</button>
+            </form>
         </div>
     </div>
 
     <script>
-        // Camera is optional. The game still works when it is unavailable or denied.
+        // Camera playback may fail on iPad even after getUserMedia permission succeeds.
+        // Keep capture, video playback, and visibility as separate observable states.
+        const cameraVideo = document.getElementById('camera-bg');
+        const cameraStatus = document.getElementById('camera-status');
+        const retryCameraBtn = document.getElementById('retry-camera-btn');
+        const speechStatus = document.getElementById('speech-status');
+        let cameraStream = null;
+        let cameraStarting = false;
+        let cameraReadyTimer = null;
+
+        function setCameraStatus(message, showRetry = false) {
+            cameraStatus.textContent = `相機：${message}`;
+            retryCameraBtn.hidden = !showRetry;
+        }
+        function setSpeechStatus(message) {
+            speechStatus.textContent = `語音：${message}`;
+        }
+        function stopCamera() {
+            clearTimeout(cameraReadyTimer);
+            cameraReadyTimer = null;
+            cameraVideo.classList.remove('camera-ready');
+            cameraVideo.pause();
+            cameraVideo.srcObject = null;
+            if (cameraStream) {
+                cameraStream.getTracks().forEach(track => track.stop());
+                cameraStream = null;
+            }
+        }
+        function cameraFrameReady() {
+            if (cameraVideo.srcObject && cameraVideo.readyState >= 2 &&
+                cameraVideo.videoWidth > 0 && cameraVideo.videoHeight > 0) {
+                clearTimeout(cameraReadyTimer);
+                cameraReadyTimer = null;
+                cameraVideo.classList.add('camera-ready');
+                setCameraStatus('播放中');
+            }
+        }
+        cameraVideo.addEventListener('playing', cameraFrameReady);
+        cameraVideo.addEventListener('loadeddata', cameraFrameReady);
+        cameraVideo.addEventListener('resize', cameraFrameReady);
+        cameraVideo.addEventListener('error', () => {
+            setCameraStatus('影片播放錯誤，請按重試', true);
+        });
+
         async function initCamera() {
-            if (!navigator.mediaDevices?.getUserMedia) {
-                showToast('相機不可用，仍可繼續遊戲');
+            if (cameraStarting) return;
+            cameraStarting = true;
+            stopCamera();
+            setCameraStatus('正在要求相機權限…');
+            if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia) {
+                setCameraStatus('需要 HTTPS 及支援相機的瀏覽器', true);
+                cameraStarting = false;
                 return;
             }
             try {
+                // A preference, not a hard constraint, so missing front cameras can fall back.
                 const stream = await navigator.mediaDevices.getUserMedia({
-                    video: { facingMode: 'user' },
-                    audio: false // Speech recognition requests microphone access separately.
+                    audio: false, video: { facingMode: { ideal: 'user' } }
                 });
-                const video = document.getElementById('camera-bg');
-                video.srcObject = stream;
-                video.play().catch(() => {});
+                cameraStream = stream;
+                const track = stream.getVideoTracks()[0];
+                if (track) track.addEventListener('ended', () => {
+                    cameraVideo.classList.remove('camera-ready');
+                    setCameraStatus('鏡頭已停止，請按重試', true);
+                });
+                cameraVideo.muted = true;
+                cameraVideo.defaultMuted = true;
+                cameraVideo.playsInline = true;
+                cameraVideo.setAttribute('playsinline', '');
+                cameraVideo.setAttribute('webkit-playsinline', '');
+                cameraVideo.srcObject = stream;
+                setCameraStatus('已授權，正在啟動畫面…');
+                // Set a timeout before awaiting play(); some WebKit players never settle.
+                cameraReadyTimer = setTimeout(() => {
+                    if (!cameraVideo.classList.contains('camera-ready')) {
+                        setCameraStatus('已授權但沒有畫面，請按重試', true);
+                    }
+                }, 4000);
+                // Safari's play() may reject; never hide the error.
+                const playResult = cameraVideo.play();
+                if (playResult?.then) await playResult;
+                cameraFrameReady();
             } catch (err) {
-                console.warn('Camera unavailable:', err);
-                showToast('無法使用相機，仍可繼續遊戲');
+                console.warn('Camera start failure:', err);
+                const reason = err?.name === 'NotAllowedError' ? '相機被拒絕或影片被阻擋'
+                    : err?.name === 'NotFoundError' ? '沒有找到相機'
+                    : err?.name === 'NotReadableError' ? '相機被其他程式佔用'
+                    : `無法啟動（${err?.name || 'unknown'}）`;
+                setCameraStatus(reason, true);
+            } finally {
+                cameraStarting = false;
             }
         }
+        retryCameraBtn.addEventListener('click', () => {
+            // Playing an existing stream synchronously inside the tap can bypass
+            // iPad's loss of user activation while waiting for getUserMedia().
+            if (cameraStream?.getVideoTracks().some(track => track.readyState === 'live')) {
+                setCameraStatus('正在重新播放…');
+                clearTimeout(cameraReadyTimer);
+                cameraReadyTimer = setTimeout(() => {
+                    if (!cameraVideo.classList.contains('camera-ready')) {
+                        setCameraStatus('仍然沒有畫面，可再次重試', true);
+                    }
+                }, 4000);
+                try {
+                    const result = cameraVideo.play();
+                    if (result?.catch) result.catch(err => {
+                        console.warn('Camera replay failed:', err);
+                        setCameraStatus(`影片無法播放（${err?.name || 'unknown'}）`, true);
+                    });
+                } catch (err) {
+                    setCameraStatus(`影片無法播放（${err?.name || 'unknown'}）`, true);
+                }
+                cameraFrameReady();
+            } else {
+                initCamera();
+            }
+        });
 
         const directions = [
             { id: 'N', name: '北', en: 'N', angle: -90 },
@@ -412,6 +561,8 @@ svg { display: block; vertical-align: middle; }
         }
 
         let voiceMode = Boolean(recognition);
+        let typeMode = !recognition; // Unsupported speech still allows guessing, not just reveal.
+        let voiceWatchdog = null;
         let isListening = false;
         let activeChallenge = null;
         let challengeTimer = null;
@@ -437,7 +588,7 @@ svg { display: block; vertical-align: middle; }
             element.classList.add('hidden-state');
             element.setAttribute('aria-label', voiceMode
                 ? '隱藏方向：按下後用語音回答'
-                : '隱藏方向：按下後顯示答案');
+                : typeMode ? '隱藏方向：按下後輸入答案' : '隱藏方向：按下後顯示答案');
             element.innerHTML = voiceMode
                 ? `<svg aria-hidden="true" class="w-6 h-6 dir-icon-mic text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>`
                 : '<span class="text-2xl font-bold" aria-hidden="true">?</span>';
@@ -476,6 +627,8 @@ svg { display: block; vertical-align: middle; }
                 setDirectionHidden(dirId, element);
             } else if (voiceMode && recognition) {
                 startVoiceChallenge(dirId, element);
+            } else if (typeMode) {
+                openAnswerModal(dirId);
             } else {
                 setDirectionVisible(dirId, element);
             }
@@ -484,7 +637,9 @@ svg { display: block; vertical-align: middle; }
         function finishChallenge(challenge) {
             if (activeChallenge !== challenge) return;
             clearTimeout(challengeTimer);
+            clearTimeout(voiceWatchdog);
             challengeTimer = null;
+            voiceWatchdog = null;
             activeChallenge = null;
             isListening = false;
         }
@@ -493,7 +648,9 @@ svg { display: block; vertical-align: middle; }
             const challenge = activeChallenge;
             if (!challenge) return;
             clearTimeout(challengeTimer);
+            clearTimeout(voiceWatchdog);
             challengeTimer = null;
+            voiceWatchdog = null;
             activeChallenge = null; // Invalidate handlers before aborting recognition.
             isListening = false;
             try { recognition?.abort(); } catch (err) { console.warn(err); }
@@ -501,6 +658,49 @@ svg { display: block; vertical-align: middle; }
                 setDirectionHidden(challenge.dirId, challenge.element);
             }
         }
+
+        let typedDirectionId = null;
+        const answerModal = document.getElementById('answer-modal');
+        const answerInput = document.getElementById('answer-input');
+        const answerFeedback = document.getElementById('answer-feedback');
+        function openAnswerModal(dirId) {
+            typedDirectionId = dirId;
+            answerInput.value = '';
+            answerFeedback.textContent = '';
+            answerModal.hidden = false;
+            answerInput.focus();
+        }
+        function closeAnswerModal() {
+            answerModal.hidden = true;
+            typedDirectionId = null;
+        }
+        document.getElementById('answer-form').addEventListener('submit', event => {
+            event.preventDefault();
+            if (!typedDirectionId) return;
+            if (checkMatch(answerInput.value, typedDirectionId)) {
+                const el = document.getElementById(`dir-${typedDirectionId}`);
+                setDirectionVisible(typedDirectionId, el);
+                setSpeechStatus('鍵盤答案正確');
+                showToast('答對了！');
+                closeAnswerModal();
+            } else {
+                answerFeedback.textContent = '答錯了，請再試一次。';
+                answerInput.select();
+            }
+        });
+        document.getElementById('answer-reveal').addEventListener('click', () => {
+            if (typedDirectionId) {
+                setDirectionVisible(typedDirectionId, document.getElementById(`dir-${typedDirectionId}`));
+            }
+            closeAnswerModal();
+        });
+        document.getElementById('answer-cancel').addEventListener('click', closeAnswerModal);
+        answerModal.addEventListener('click', event => {
+            if (event.target === answerModal) closeAnswerModal();
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key === 'Escape' && !answerModal.hidden) closeAnswerModal();
+        });
 
         function hideRandomDirections(count) {
             cancelVoiceChallenge();
@@ -557,7 +757,14 @@ svg { display: block; vertical-align: middle; }
             element.classList.remove('error', 'success');
             element.classList.add('hidden-state', 'listening');
             recognition.lang = document.getElementById('lang-select').value;
+            setSpeechStatus('正在啟動辨識…');
             showToast('請說出方向（聆聽中…）');
+            recognition.onstart = () => {
+                if (activeChallenge === challenge) setSpeechStatus('已啟動，請說出方向');
+            };
+            recognition.onaudiostart = () => {
+                if (activeChallenge === challenge) setSpeechStatus('咪高峰收音中…');
+            };
 
             recognition.onresult = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
@@ -566,6 +773,7 @@ svg { display: block; vertical-align: middle; }
                 element.classList.remove('listening');
                 if (checkMatch(transcript, dirId)) {
                     element.classList.add('success');
+                    setSpeechStatus(`已識別：「${transcript}」— 正確`);
                     showToast(`正確！(${transcript})`);
                     challengeTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
@@ -574,6 +782,7 @@ svg { display: block; vertical-align: middle; }
                     }, 800);
                 } else {
                     element.classList.add('error');
+                    setSpeechStatus(`已識別：「${transcript || '空白'}」— 答錯`);
                     showToast(`再試一次，聽到：「${transcript || '（沒有回答）'}」`);
                     challengeTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
@@ -586,17 +795,34 @@ svg { display: block; vertical-align: middle; }
             recognition.onerror = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
-                console.warn('Speech recognition error:', event.error);
+                const code = event.error || 'unknown';
+                console.warn('Speech recognition error:', code, event.message || '');
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
-                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                const messages = {
+                    'not-allowed': '未獲麥克風／語音辨識權限',
+                    'service-not-allowed': '瀏覽器或 Siri 語音服務不允許',
+                    'language-not-supported': '此語言未受辨識服務支援，請試其他語言',
+                    'language-unavailable': '此語言暫時不可用',
+                    'audio-capture': '找不到咪高峰或無法收音',
+                    'network': '語音服務網絡錯誤',
+                    'no-speech': '未偵測到聲音，請再試一次',
+                    'aborted': '辨識已停止'
+                };
+                const message = messages[code] || `語音辨識錯誤：${code}`;
+                const hardFailure = ['not-allowed', 'service-not-allowed',
+                    'language-not-supported', 'language-unavailable',
+                    'audio-capture', 'network'].includes(code);
+                if (hardFailure) {
                     voiceMode = false;
+                    typeMode = true;
                     updateVoiceBtnUI();
-                    showToast('麥克風無法使用，已切換手動顯示');
-                } else if (event.error === 'no-speech') {
-                    showToast('沒有聽到回答，請再試一次');
+                    setSpeechStatus(`${message}，已改用鍵盤（Safari 請啟用 Siri）`);
+                    showToast('語音不可用，請輸入方向答案');
+                    openAnswerModal(dirId);
                 } else {
-                    showToast(`語音錯誤：${event.error || 'unknown'}`);
+                    setSpeechStatus(message);
+                    showToast(message);
                 }
             };
 
@@ -605,16 +831,34 @@ svg { display: block; vertical-align: middle; }
                 challenge.resolved = true;
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
+                setSpeechStatus('沒有聽到回答，請再試一次');
                 showToast('沒有聽到回答，請再試一次');
             };
 
             try {
                 recognition.start();
+                // Some embedded iPad browsers expose the API but never start it.
+                voiceWatchdog = setTimeout(() => {
+                    if (activeChallenge !== challenge || challenge.resolved) return;
+                    challenge.resolved = true;
+                    setDirectionHidden(dirId, element);
+                    finishChallenge(challenge);
+                    try { recognition.abort(); } catch (_) {}
+                    voiceMode = false;
+                    typeMode = true;
+                    updateVoiceBtnUI();
+                    setSpeechStatus('辨識沒有回應，請改用 Safari 並啟用 Siri；目前可用鍵盤回答');
+                    openAnswerModal(dirId);
+                }, 18000);
             } catch (err) {
                 console.warn('Could not start speech recognition:', err);
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
-                showToast('無法啟動語音識別，請重試或關閉語音');
+                voiceMode = false;
+                typeMode = true;
+                updateVoiceBtnUI();
+                setSpeechStatus(`無法啟動辨識：${err?.name || 'unknown'}，改用鍵盤`);
+                openAnswerModal(dirId);
             }
         }
 
@@ -750,7 +994,7 @@ svg { display: block; vertical-align: middle; }
         }
 
         function updateVoiceBtnUI() {
-            voiceBtn.textContent = voiceMode ? 'ON' : 'OFF';
+            voiceBtn.textContent = voiceMode ? 'ON' : typeMode ? '輸入' : 'OFF';
             voiceBtn.classList.toggle('bg-green-500', voiceMode);
             voiceBtn.classList.toggle('hover:bg-green-600', voiceMode);
             voiceBtn.classList.toggle('bg-gray-500', !voiceMode);
@@ -765,15 +1009,29 @@ svg { display: block; vertical-align: middle; }
             });
         }
 
-        voiceBtn.addEventListener('click', () => {
-            if (!recognition) {
-                showToast('此瀏覽器不支持語音識別，可使用手動顯示');
-                return;
-            }
+        document.getElementById('use-keyboard-btn').addEventListener('click', () => {
             cancelVoiceChallenge();
-            voiceMode = !voiceMode;
+            voiceMode = false;
+            typeMode = true;
             updateVoiceBtnUI();
-            showToast(`語音模式已${voiceMode ? '開啟' : '關閉'}`);
+            setSpeechStatus('鍵盤模式：點擊隱藏方向後輸入答案');
+        });
+
+        voiceBtn.addEventListener('click', () => {
+            cancelVoiceChallenge();
+            if (!recognition) {
+                typeMode = !typeMode;
+                setSpeechStatus(typeMode ? '此瀏覽器不支援語音，改為鍵盤回答' : '手動顯示答案');
+            } else if (voiceMode) {
+                voiceMode = false;
+                typeMode = false;
+                setSpeechStatus('關閉（點方向直接顯示答案）');
+            } else {
+                voiceMode = true;
+                typeMode = false;
+                setSpeechStatus('準備就緒；請點隱藏方向開始辨識');
+            }
+            updateVoiceBtnUI();
         });
 
         document.getElementById('start-btn').addEventListener('click', () => {
@@ -786,19 +1044,22 @@ svg { display: block; vertical-align: middle; }
             setTimeout(() => {
                 overlay.style.display = 'none';
                 hideSelectedCount();
-                if (!recognition) showToast('此瀏覽器不支持語音，可直接點擊顯示答案');
+                if (!recognition) showToast('此瀏覽器不支援語音，已切換鍵盤回答');
             }, 500);
         });
 
         // Stop the camera when navigating away, including when the tab is closed.
-        window.addEventListener('pagehide', () => {
-            const video = document.getElementById('camera-bg');
-            video.srcObject?.getTracks().forEach(track => track.stop());
+        window.addEventListener('pagehide', stopCamera);
+        window.addEventListener('pageshow', event => {
+            if (event.persisted && started) setCameraStatus('頁面已恢復，請按重試', true);
         });
 
         // Script is at the end of <body>; nodes are ready and no network is required.
         initCompass();
         updateVoiceBtnUI();
+        setSpeechStatus(recognition
+            ? '已支援，點隱藏方向開始（iPad Safari 需啟用 Siri）'
+            : '此瀏覽器未提供辨識功能，可用鍵盤回答');
     </script>
 </body>
 </html>
