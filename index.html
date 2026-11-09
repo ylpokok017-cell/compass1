@@ -400,6 +400,7 @@ svg { display: block; vertical-align: middle; }
             <div class="device-line"><span id="camera-status" role="status">相機：未啟動</span><button id="retry-camera-btn" type="button" hidden>重試相機</button></div>
             <div class="device-line"><span id="speech-status" role="status">語音：準備中</span><button id="use-keyboard-btn" type="button">鍵盤回答</button></div>
             <div class="device-line">按一下方向可隱藏，再按一下可用語音／鍵盤猜答案；關閉語音則直接顯示。</div>
+            <div class="device-line" id="app-version" aria-label="程式版本">版本 v4.3 · 方向名稱統一顯示</div>
         </div>
     </div>
 
@@ -749,40 +750,49 @@ svg { display: block; vertical-align: middle; }
             return (acceptable[dirId] || []).includes(answer);
         }
 
-        // Safari often converts spoken compass words into similar-sounding Chinese
-        // characters. Be forgiving ONLY with speech, not with typed answers.
-        // This handles Cantonese "南" -> "藍/男", "東" -> "冬", "西" -> "犀",
-        // including combinations like "西藍" -> "西南".
-        // Whole-answer matching still prevents "西" from passing as "西南".
-        function checkSpokenMatch(spokenText, dirId) {
-            if (typeof spokenText !== 'string') return false;
-            if (checkMatch(spokenText, dirId)) return true;
-            const normalized = spokenText
-                .replace(/[藍蓝籃篮男難难]/g, '南')
+        // Speech-only homophone tolerance for Cantonese / Mandarin recognition.
+        // Keep keyboard answers strict and keep direction matching whole-word:
+        // "洗" → 西, "藍" → 南, but "洗" must NOT count as 西南.
+        function normalizeSpokenAnswer(spokenText) {
+            if (typeof spokenText !== 'string') return '';
+            return spokenText.normalize('NFKC')
+                .replace(/[藍蓝籃篮男難难蘭兰]/g, '南')
                 .replace(/[冬]/g, '東')
-                .replace(/[犀]/g, '西');
-            return checkMatch(normalized, dirId);
+                .replace(/[犀洗]/g, '西')
+                // The recognition service may include a short spoken lead-in.
+                // Do not use substring matching; full direction is still required.
+                .replace(/^(?:我說|我说|我講|我讲|我估|應該係|应该是|應該是|答案係)/, '');
         }
 
-        // Prefer the top transcript. Only consult lower alternatives when the
-        // top one isn't any recognizable direction (e.g. a random homophone).
-        // If the top guess is a different valid direction, never silently
-        // override it with a lower-confidence alternative.
+        function spokenDirectionId(spokenText) {
+            const normalized = normalizeSpokenAnswer(spokenText);
+            const matches = directions.filter(d => checkMatch(normalized, d.id));
+            return matches.length === 1 ? matches[0].id : null;
+        }
+
+        function checkSpokenMatch(spokenText, dirId) {
+            return spokenDirectionId(spokenText) === dirId;
+        }
+
+        // Use the first Safari hypothesis if it resolves to ANY direction.
+        // Only try alternatives when the first one is unrecognizable. This
+        // prevents a lower-confidence answer overriding a clear wrong answer.
         function getSpokenMatch(results, targetDirId) {
             const candidates = results ? Array.from(results).map(r => r?.transcript || '') : [];
             const first = candidates[0] || '';
-            if (checkSpokenMatch(first, targetDirId)) {
-                return { accepted: true, heard: first };
-            }
-            if (directions.some(d => checkSpokenMatch(first, d.id))) {
-                return { accepted: false, heard: first };
+            const firstId = spokenDirectionId(first);
+            if (firstId) {
+                return { accepted: firstId === targetDirId,
+                    heard: first, interpreted: directionById(firstId).name };
             }
             for (const candidate of candidates.slice(1)) {
-                if (checkSpokenMatch(candidate, targetDirId)) {
-                    return { accepted: true, heard: candidate };
+                const candidateId = spokenDirectionId(candidate);
+                if (candidateId === targetDirId) {
+                    return { accepted: true, heard: candidate,
+                        interpreted: directionById(candidateId).name };
                 }
             }
-            return { accepted: false, heard: first };
+            return { accepted: false, heard: first, interpreted: null };
         }
 
         function startVoiceChallenge(dirId, element) {
@@ -805,12 +815,17 @@ svg { display: block; vertical-align: middle; }
             recognition.onresult = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
-                const { accepted, heard: transcript } = getSpokenMatch(event.results?.[0], dirId);
+                const { accepted, heard: transcript, interpreted } = getSpokenMatch(event.results?.[0], dirId);
+                // Always show the standard direction name when speech maps to one.
+                // For example Safari's "藍" displays "南"; "洗" displays "西".
+                // Only show raw text if no recognizable direction was found.
+                const displayAnswer = interpreted || transcript || '（沒有回答）';
                 element.classList.remove('listening');
                 if (accepted) {
                     element.classList.add('success');
-                    setSpeechStatus(`已識別：「${transcript}」— 正確`);
-                    showToast(`正確！(${transcript})`);
+                    const correctDirection = directionById(dirId).name;
+                    setSpeechStatus(`答對了！${correctDirection}`);
+                    showToast(`正確！${correctDirection}`);
                     challengeTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
                         setDirectionVisible(dirId, element);
@@ -818,8 +833,8 @@ svg { display: block; vertical-align: middle; }
                     }, 800);
                 } else {
                     element.classList.add('error');
-                    setSpeechStatus(`已識別：「${transcript || '空白'}」— 答錯`);
-                    showToast(`再試一次，聽到：「${transcript || '（沒有回答）'}」`);
+                    setSpeechStatus(`辨識結果：「${displayAnswer}」— 答錯（不符合此方向）`);
+                    showToast(`再試一次，辨識結果：「${displayAnswer}」`);
                     challengeTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
                         setDirectionHidden(dirId, element);
