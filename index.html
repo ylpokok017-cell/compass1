@@ -1,0 +1,804 @@
+<!DOCTYPE html>
+<html lang="zh-HK">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Compass Direction Guessing Game</title>
+    <style>
+/* The small set of Tailwind-like utilities used by this page, bundled locally.
+   No build step or external CSS/JS dependency is required on GitHub Pages. */
+*, *::before, *::after { box-sizing: border-box; }
+html { line-height: 1.5; -webkit-text-size-adjust: 100%; }
+body { line-height: inherit; }
+button, select { font: inherit; }
+button { cursor: pointer; background: transparent; border: 0; color: inherit; }
+h1, h2, p { margin: 0; }
+svg { display: block; vertical-align: middle; }
+.absolute { position: absolute; }
+.inset-0 { inset: 0; }
+.flex { display: flex; }
+.flex-col { flex-direction: column; }
+.flex-grow { flex-grow: 1; }
+.items-center { align-items: center; }
+.items-start { align-items: flex-start; }
+.justify-between { justify-content: space-between; }
+.justify-center { justify-content: center; }
+.gap-2 { gap: .5rem; }
+.gap-3 { gap: .75rem; }
+.min-h-0 { min-height: 0; }
+.max-w-sm { max-width: 24rem; }
+.max-w-3xl { max-width: 48rem; }
+.w-4 { width: 1rem; }
+.w-6 { width: 1.5rem; }
+.w-full { width: 100%; }
+.h-4 { height: 1rem; }
+.h-6 { height: 1.5rem; }
+.mx-auto { margin-left: auto; margin-right: auto; }
+.mb-4 { margin-bottom: 1rem; }
+.mb-6 { margin-bottom: 1.5rem; }
+.mt-4 { margin-top: 1rem; }
+.mt-8 { margin-top: 2rem; }
+.p-4 { padding: 1rem; }
+.p-8 { padding: 2rem; }
+.px-2 { padding-left: .5rem; padding-right: .5rem; }
+.px-3 { padding-left: .75rem; padding-right: .75rem; }
+.px-4 { padding-left: 1rem; padding-right: 1rem; }
+.px-6 { padding-left: 1.5rem; padding-right: 1.5rem; }
+.px-8 { padding-left: 2rem; padding-right: 2rem; }
+.py-1 { padding-top: .25rem; padding-bottom: .25rem; }
+.py-2 { padding-top: .5rem; padding-bottom: .5rem; }
+.py-3 { padding-top: .75rem; padding-bottom: .75rem; }
+.pt-10 { padding-top: 2.5rem; }
+.pb-4 { padding-bottom: 1rem; }
+.pb-8 { padding-bottom: 2rem; }
+.rounded-lg { border-radius: .5rem; }
+.rounded-xl { border-radius: .75rem; }
+.rounded-2xl { border-radius: 1rem; }
+.rounded-3xl { border-radius: 1.5rem; }
+.rounded-full { border-radius: 9999px; }
+.border { border: 1px solid; }
+.border-white\/30 { border-color: rgb(255 255 255 / .3); }
+.bg-white\/20 { background-color: rgb(255 255 255 / .2); }
+.bg-blue-500 { background-color: #3b82f6; }
+.bg-gray-500 { background-color: #6b7280; }
+.bg-green-500 { background-color: #22c55e; }
+.bg-purple-500 { background-color: #a855f7; }
+.text-white { color: #fff; }
+.text-black { color: #000; }
+.text-gray-300 { color: #d1d5db; }
+.text-gray-500 { color: #6b7280; }
+.text-gray-800 { color: #1f2937; }
+.text-white\/70 { color: rgb(255 255 255 / .7); }
+.text-center { text-align: center; }
+.text-xs { font-size: .75rem; line-height: 1rem; }
+.text-sm { font-size: .875rem; line-height: 1.25rem; }
+.text-lg { font-size: 1.125rem; line-height: 1.75rem; }
+.text-xl { font-size: 1.25rem; line-height: 1.75rem; }
+.text-2xl { font-size: 1.5rem; line-height: 2rem; }
+.font-medium { font-weight: 500; }
+.font-semibold { font-weight: 600; }
+.font-bold { font-weight: 700; }
+.tracking-wide { letter-spacing: .025em; }
+.shadow-lg { box-shadow: 0 10px 15px -3px rgb(0 0 0 / .1), 0 4px 6px -4px rgb(0 0 0 / .1); }
+.pointer-events-none { pointer-events: none; }
+.pointer-events-auto { pointer-events: auto; }
+.outline-none { outline: none; }
+.hidden { display: none; }
+.transform { transform: translateZ(0); }
+.transition { transition-property: color, background-color, border-color, opacity, box-shadow, transform; transition-duration: .15s; transition-timing-function: cubic-bezier(.4, 0, .2, 1); }
+.hover\:bg-blue-600:hover { background-color: #2563eb; }
+.hover\:bg-green-600:hover { background-color: #16a34a; }
+.hover\:bg-gray-600:hover { background-color: #4b5563; }
+.hover\:bg-purple-500:hover { background-color: #a855f7; }
+.hover\:bg-white\/20:hover { background-color: rgb(255 255 255 / .2); }
+.hover\:scale-105:hover { transform: scale(1.05); }
+.active\:scale-95:active { transform: scale(.95); }
+    </style>
+    <style>
+        /* Base styles and camera background */
+        body, html {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            font-family: 'Inter', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+            background-color: #000;
+            touch-action: manipulation; /* Preserve touch interactions without disabling zoom. */
+        }
+        
+        #camera-bg {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100vw;
+            height: 100vh;
+            object-fit: cover;
+            z-index: -1;
+            transform: scaleX(-1); /* Mirror effect for front camera */
+        }
+
+        /* Glassmorphism UI Effects */
+        .glass-panel {
+            background: rgba(255, 255, 255, 0.15);
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            border: 1px solid rgba(255, 255, 255, 0.3);
+            box-shadow: 0 8px 32px 0 rgba(0, 0, 0, 0.3);
+        }
+        
+        .compass-container {
+            position: relative;
+            width: min(320px, 88vw, 48dvh);
+            height: auto;
+            aspect-ratio: 1;
+            flex: none;
+            margin: 0 auto;
+            border-radius: 50%;
+            border: 2px dashed rgba(255, 255, 255, 0.4);
+        }
+
+        .compass-center {
+            position: absolute;
+            top: 50%;
+            left: 50%;
+            transform: translate(-50%, -50%);
+            width: 20px;
+            height: 20px;
+            background: rgba(255, 255, 255, 0.8);
+            border-radius: 50%;
+            box-shadow: 0 0 10px rgba(255,255,255,0.5);
+        }
+
+        .direction-point {
+            position: absolute;
+            transform: translate(-50%, -50%);
+            width: min(70px, 20%);
+            aspect-ratio: 1;
+            height: auto;
+            padding: 0;
+            font: inherit;
+            border-radius: 50%;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            user-select: none;
+            -webkit-user-select: none;
+        }
+
+        .direction-point:focus-visible {
+            outline: 3px solid #fff;
+            outline-offset: 3px;
+        }
+
+        @media (min-width: 768px) {
+            .compass-container { width: min(480px, 80vw, 60dvh); }
+        }
+
+        .direction-point:active {
+            transform: translate(-50%, -50%) scale(0.9);
+        }
+
+        .direction-point.visible {
+            background: rgba(255, 255, 255, 0.85);
+            color: #1f2937;
+            border: 2px solid #fff;
+            box-shadow: 0 4px 15px rgba(0,0,0,0.2);
+        }
+
+        .direction-point.hidden-state {
+            background: rgba(31, 41, 55, 0.7);
+            color: #fff;
+            border: 2px solid rgba(255, 255, 255, 0.4);
+            backdrop-filter: blur(4px);
+        }
+
+        .direction-point.listening {
+            animation: pulse-ring 1s infinite;
+            background: rgba(59, 130, 246, 0.8);
+            border-color: #60a5fa;
+        }
+        
+        .direction-point.error {
+            animation: shake 0.4s ease-in-out;
+            background: rgba(239, 68, 68, 0.8);
+            border-color: #fca5a5;
+        }
+
+        .direction-point.success {
+            background: rgba(34, 197, 94, 0.8);
+            border-color: #86efac;
+            color: white;
+        }
+
+        /* Animations */
+        @keyframes pulse-ring {
+            0% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0.7); }
+            70% { box-shadow: 0 0 0 15px rgba(59, 130, 246, 0); }
+            100% { box-shadow: 0 0 0 0 rgba(59, 130, 246, 0); }
+        }
+
+        @keyframes shake {
+            0%, 100% { transform: translate(-50%, -50%) translateX(0); }
+            20%, 60% { transform: translate(-50%, -50%) translateX(-5px); }
+            40%, 80% { transform: translate(-50%, -50%) translateX(5px); }
+        }
+
+        /* Toast message */
+        #toast {
+            position: fixed;
+            top: 20px;
+            left: 50%;
+            transform: translateX(-50%);
+            z-index: 50;
+            transition: opacity 0.3s, transform 0.3s;
+            opacity: 0;
+            pointer-events: none;
+        }
+        #toast.show {
+            opacity: 1;
+            transform: translateX(-50%) translateY(10px);
+        }
+
+        /* Compass Rotation specific styles */
+        #compass {
+            will-change: transform;
+            touch-action: none; /* Crucial for manual drag on mobile */
+            cursor: grab;
+        }
+        #compass:active {
+            cursor: grabbing;
+        }
+        .direction-point {
+            will-change: transform;
+        }
+
+        /* Keep the two sets of controls usable on narrow phones. */
+        #controls-header { gap: 8px; }
+        #hide-btn { white-space: nowrap; }
+        @media (max-width: 360px) {
+            .compact-english { display: none; }
+            #settings-panel { padding: .6rem; gap: .5rem; }
+            #settings-panel .flex.items-center { gap: .35rem; }
+            #settings-panel label { white-space: nowrap; }
+            #lang-select { max-width: 115px; }
+            #hide-actions { padding: .35rem; gap: .3rem; }
+            #hide-btn { padding: .2rem .35rem; }
+        }
+
+        /* Start Screen Overlay */
+        #start-screen {
+            position: fixed;
+            inset: 0;
+            background: rgba(0, 0, 0, 0.8);
+            z-index: 100;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            backdrop-filter: blur(10px);
+            -webkit-backdrop-filter: blur(10px);
+            transition: opacity 0.5s;
+        }
+    </style>
+</head>
+<body class="text-white">
+
+    <!-- Start Screen (Required for iOS Safari Camera/Mic Permissions) -->
+    <div id="start-screen">
+        <div class="glass-panel p-8 rounded-3xl text-center max-w-sm">
+            <h1 class="text-2xl font-bold mb-4">指南針猜猜看<br><span class="text-lg font-medium text-gray-300">Compass Guesser</span></h1>
+            <p class="text-sm text-gray-300 mb-6">相機可作背景，並非必需。使用語音回答時才會要求麥克風權限。</p>
+            <button id="start-btn" class="bg-blue-500 hover:bg-blue-600 text-white font-bold py-3 px-8 rounded-full shadow-lg transform transition hover:scale-105 active:scale-95">
+                開始遊戲 (Start)
+            </button>
+        </div>
+    </div>
+
+    <!-- Camera Background -->
+    <video id="camera-bg" autoplay playsinline muted></video>
+
+    <!-- Toast Notification -->
+    <div id="toast" role="status" aria-live="polite" class="glass-panel px-6 py-3 rounded-full font-bold text-sm tracking-wide text-white shadow-lg">
+        Message
+    </div>
+
+    <!-- Main UI Overlay -->
+    <div class="absolute inset-0 flex flex-col justify-between pt-10 pb-8 px-4 pointer-events-none">
+        
+        <!-- Header Controls -->
+        <div id="controls-header" class="flex justify-between items-start pointer-events-auto max-w-3xl mx-auto w-full">
+            <div id="settings-panel" class="glass-panel rounded-2xl p-4 flex flex-col gap-3">
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-semibold">語音<span class="compact-english"> (Voice)</span>:</label>
+                    <button id="toggle-voice-btn" class="bg-green-500 hover:bg-green-600 px-3 py-1 rounded-full text-xs font-bold transition">ON</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-semibold">旋轉<span class="compact-english"> (Rotate)</span>:</label>
+                    <button id="toggle-gyro-btn" class="bg-gray-500 hover:bg-purple-500 px-3 py-1 rounded-full text-xs font-bold transition">手動 (Manual)</button>
+                </div>
+                <div class="flex items-center gap-2">
+                    <label class="text-sm font-semibold">語言<span class="compact-english"> (Lang)</span>:</label>
+                    <select id="lang-select" class="bg-white/20 border border-white/30 text-white text-xs rounded-lg px-2 py-1 outline-none">
+                        <option value="yue-Hant-HK" class="text-black">粵語</option>
+                        <option value="zh-CN" class="text-black">普通話</option>
+                        <option value="en-US" class="text-black">English</option>
+                    </select>
+                </div>
+            </div>
+            
+            <div id="action-panel" class="flex flex-col gap-2">
+                <div id="hide-actions" class="glass-panel px-3 py-2 rounded-xl flex items-center gap-2">
+                    <select id="hide-count" class="bg-white/20 border border-white/30 text-white text-sm font-bold rounded-lg px-2 py-1 outline-none">
+                        <option value="1" class="text-black">1</option>
+                        <option value="2" class="text-black">2</option>
+                        <option value="3" class="text-black" selected>3</option>
+                        <option value="4" class="text-black">4</option>
+                        <option value="5" class="text-black">5</option>
+                        <option value="6" class="text-black">6</option>
+                        <option value="7" class="text-black">7</option>
+                        <option value="8" class="text-black">8</option>
+                    </select>
+                    <button id="hide-btn" onclick="hideSelectedCount()" class="hover:bg-white/20 px-2 py-1 rounded-lg text-sm font-bold transition">
+                        隱藏
+                    </button>
+                </div>
+                <button onclick="revealAll()" class="glass-panel hover:bg-white/20 px-4 py-2 rounded-xl text-sm font-bold transition flex items-center justify-center gap-2">
+                    <svg class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M2.458 12C3.732 7.943 7.523 5 12 5c4.478 0 8.268 2.943 9.542 7-1.274 4.057-5.064 7-9.542 7-4.477 0-8.268-2.943-9.542-7z"></path></svg>
+                    全顯示
+                </button>
+            </div>
+        </div>
+
+        <!-- Compass Area -->
+        <div class="flex-grow min-h-0 flex items-center justify-center pointer-events-auto mt-8">
+            <!-- Responsive compass: smaller on phones, larger on iPads. -->
+            <div id="compass" class="compass-container" aria-label="八個方向的指南針">
+                <div class="compass-center"></div>
+                <!-- Directions will be injected here via JS -->
+            </div>
+        </div>
+        
+        <!-- Bottom instructions -->
+        <div class="text-center text-white/70 text-xs mt-4 pb-4 font-medium pointer-events-auto">
+            按一下方向可以隱藏。<br>點擊被隱藏的方向可以使用語音回答或直接顯示。
+        </div>
+    </div>
+
+    <script>
+        // Camera is optional. The game still works when it is unavailable or denied.
+        async function initCamera() {
+            if (!navigator.mediaDevices?.getUserMedia) {
+                showToast('相機不可用，仍可繼續遊戲');
+                return;
+            }
+            try {
+                const stream = await navigator.mediaDevices.getUserMedia({
+                    video: { facingMode: 'user' },
+                    audio: false // Speech recognition requests microphone access separately.
+                });
+                const video = document.getElementById('camera-bg');
+                video.srcObject = stream;
+                video.play().catch(() => {});
+            } catch (err) {
+                console.warn('Camera unavailable:', err);
+                showToast('無法使用相機，仍可繼續遊戲');
+            }
+        }
+
+        const directions = [
+            { id: 'N', name: '北', en: 'N', angle: -90 },
+            { id: 'NE', name: '東北', en: 'NE', angle: -45 },
+            { id: 'E', name: '東', en: 'E', angle: 0 },
+            { id: 'SE', name: '東南', en: 'SE', angle: 45 },
+            { id: 'S', name: '南', en: 'S', angle: 90 },
+            { id: 'SW', name: '西南', en: 'SW', angle: 135 },
+            { id: 'W', name: '西', en: 'W', angle: 180 },
+            { id: 'NW', name: '西北', en: 'NW', angle: 225 }
+        ];
+
+        const compassEl = document.getElementById('compass');
+        const voiceBtn = document.getElementById('toggle-voice-btn');
+        const gyroBtn = document.getElementById('toggle-gyro-btn');
+        const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+        const recognition = SpeechRecognition ? new SpeechRecognition() : null;
+        if (recognition) {
+            recognition.continuous = false;
+            recognition.interimResults = false;
+            recognition.maxAlternatives = 1;
+        }
+
+        let voiceMode = Boolean(recognition);
+        let isListening = false;
+        let activeChallenge = null;
+        let challengeTimer = null;
+        let toastTimer = null;
+        let compassRotation = 0;
+        let isDragging = false;
+        let hasDragged = false;
+        let previousDragAngle = 0;
+        let dragTravel = 0;
+        let dragResetTimer = null;
+        let gyroMode = false;
+        let gyroReadTimer = null;
+        let gyroHasReading = false;
+        let started = false;
+
+        function directionById(dirId) {
+            return directions.find(d => d.id === dirId);
+        }
+
+        function setDirectionHidden(dirId, element) {
+            // Always rebuild the contents. The previous markup may be just '?' (voice off).
+            element.classList.remove('visible', 'listening', 'error', 'success');
+            element.classList.add('hidden-state');
+            element.setAttribute('aria-label', voiceMode
+                ? '隱藏方向：按下後用語音回答'
+                : '隱藏方向：按下後顯示答案');
+            element.innerHTML = voiceMode
+                ? `<svg aria-hidden="true" class="w-6 h-6 dir-icon-mic text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M19 11a7 7 0 01-7 7m0 0a7 7 0 01-7-7m7 7v4m0 0H8m4 0h4m-4-8a3 3 0 01-3-3V5a3 3 0 116 0v6a3 3 0 01-3 3z"></path></svg>`
+                : '<span class="text-2xl font-bold" aria-hidden="true">?</span>';
+        }
+
+        function setDirectionVisible(dirId, element) {
+            const dir = directionById(dirId);
+            element.classList.remove('hidden-state', 'listening', 'error', 'success');
+            element.classList.add('visible');
+            element.setAttribute('aria-label', `${dir.name} (${dir.en})：按下後隱藏`);
+            element.innerHTML = `
+                <span class="text-xl font-bold dir-text-zh text-gray-800">${dir.name}</span>
+                <span class="text-xs font-medium dir-text-en text-gray-500">${dir.en}</span>
+            `;
+        }
+
+        function initCompass() {
+            directions.forEach(dir => {
+                const element = document.createElement('button');
+                element.type = 'button';
+                element.className = 'direction-point';
+                element.id = `dir-${dir.id}`;
+                const angle = dir.angle * Math.PI / 180;
+                element.style.left = `${50 + Math.cos(angle) * 40}%`;
+                element.style.top = `${50 + Math.sin(angle) * 40}%`;
+                element.style.transform = `translate(-50%, -50%) rotate(${-compassRotation}deg)`;
+                setDirectionVisible(dir.id, element);
+                element.addEventListener('click', () => handleDirectionClick(dir.id, element));
+                compassEl.appendChild(element);
+            });
+        }
+
+        function handleDirectionClick(dirId, element) {
+            if (isListening || hasDragged) return;
+            if (element.classList.contains('visible')) {
+                setDirectionHidden(dirId, element);
+            } else if (voiceMode && recognition) {
+                startVoiceChallenge(dirId, element);
+            } else {
+                setDirectionVisible(dirId, element);
+            }
+        }
+
+        function finishChallenge(challenge) {
+            if (activeChallenge !== challenge) return;
+            clearTimeout(challengeTimer);
+            challengeTimer = null;
+            activeChallenge = null;
+            isListening = false;
+        }
+
+        function cancelVoiceChallenge() {
+            const challenge = activeChallenge;
+            if (!challenge) return;
+            clearTimeout(challengeTimer);
+            challengeTimer = null;
+            activeChallenge = null; // Invalidate handlers before aborting recognition.
+            isListening = false;
+            try { recognition?.abort(); } catch (err) { console.warn(err); }
+            if (challenge.element.classList.contains('hidden-state')) {
+                setDirectionHidden(challenge.dirId, challenge.element);
+            }
+        }
+
+        function hideRandomDirections(count) {
+            cancelVoiceChallenge();
+            revealAll();
+            const shuffled = [...directions];
+            // Fisher-Yates: unbiased shuffle (unlike Array.sort(() => Math.random() - 0.5)).
+            for (let i = shuffled.length - 1; i > 0; i--) {
+                const j = Math.floor(Math.random() * (i + 1));
+                [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+            }
+            const safeCount = Math.max(0, Math.min(shuffled.length, Number(count) || 0));
+            shuffled.slice(0, safeCount).forEach(dir => {
+                setDirectionHidden(dir.id, document.getElementById(`dir-${dir.id}`));
+            });
+            showToast(`已隨機隱藏 ${safeCount} 個方向`);
+        }
+
+        function revealAll() {
+            cancelVoiceChallenge();
+            directions.forEach(dir => {
+                setDirectionVisible(dir.id, document.getElementById(`dir-${dir.id}`));
+            });
+        }
+
+        function hideSelectedCount() {
+            hideRandomDirections(Number(document.getElementById('hide-count').value));
+        }
+
+        // Match complete answers rather than substrings: "west" must never match "e".
+        function checkMatch(spokenText, dirId) {
+            if (typeof spokenText !== 'string') return false;
+            const answer = spokenText.normalize('NFKC').toLowerCase()
+                .replace(/[\s\u3000.,!?，。！？、:;；'’"“”「」『』()（）_\-/]+/g, '')
+                .replace(/^(?:我猜|答案是|係|系|是)/, '')
+                .replace(/(?:方向|方位|方|邊|边|面)$/, '');
+            const acceptable = {
+                N: ['北', '正北', 'north', 'n'],
+                NE: ['東北', '东北', 'northeast', 'ne'],
+                E: ['東', '东', '正東', '正东', 'east', 'e'],
+                SE: ['東南', '东南', 'southeast', 'se'],
+                S: ['南', '正南', 'south', 's'],
+                SW: ['西南', 'southwest', 'sw'],
+                W: ['西', '正西', 'west', 'w'],
+                NW: ['西北', 'northwest', 'nw']
+            };
+            return (acceptable[dirId] || []).includes(answer);
+        }
+
+        function startVoiceChallenge(dirId, element) {
+            if (!recognition || activeChallenge) return;
+            const challenge = { dirId, element, resolved: false };
+            activeChallenge = challenge;
+            isListening = true;
+            element.classList.remove('error', 'success');
+            element.classList.add('hidden-state', 'listening');
+            recognition.lang = document.getElementById('lang-select').value;
+            showToast('請說出方向（聆聽中…）');
+
+            recognition.onresult = event => {
+                if (activeChallenge !== challenge || challenge.resolved) return;
+                challenge.resolved = true;
+                const transcript = event.results?.[0]?.[0]?.transcript || '';
+                element.classList.remove('listening');
+                if (checkMatch(transcript, dirId)) {
+                    element.classList.add('success');
+                    showToast(`正確！(${transcript})`);
+                    challengeTimer = setTimeout(() => {
+                        if (activeChallenge !== challenge) return;
+                        setDirectionVisible(dirId, element);
+                        finishChallenge(challenge);
+                    }, 800);
+                } else {
+                    element.classList.add('error');
+                    showToast(`再試一次，聽到：「${transcript || '（沒有回答）'}」`);
+                    challengeTimer = setTimeout(() => {
+                        if (activeChallenge !== challenge) return;
+                        setDirectionHidden(dirId, element);
+                        finishChallenge(challenge);
+                    }, 1000);
+                }
+            };
+
+            recognition.onerror = event => {
+                if (activeChallenge !== challenge || challenge.resolved) return;
+                challenge.resolved = true;
+                console.warn('Speech recognition error:', event.error);
+                setDirectionHidden(dirId, element);
+                finishChallenge(challenge);
+                if (event.error === 'not-allowed' || event.error === 'service-not-allowed') {
+                    voiceMode = false;
+                    updateVoiceBtnUI();
+                    showToast('麥克風無法使用，已切換手動顯示');
+                } else if (event.error === 'no-speech') {
+                    showToast('沒有聽到回答，請再試一次');
+                } else {
+                    showToast(`語音錯誤：${event.error || 'unknown'}`);
+                }
+            };
+
+            recognition.onend = () => {
+                if (activeChallenge !== challenge || challenge.resolved) return;
+                challenge.resolved = true;
+                setDirectionHidden(dirId, element);
+                finishChallenge(challenge);
+                showToast('沒有聽到回答，請再試一次');
+            };
+
+            try {
+                recognition.start();
+            } catch (err) {
+                console.warn('Could not start speech recognition:', err);
+                setDirectionHidden(dirId, element);
+                finishChallenge(challenge);
+                showToast('無法啟動語音識別，請重試或關閉語音');
+            }
+        }
+
+        function updateRotation(angle) {
+            if (!Number.isFinite(angle)) return;
+            compassRotation = angle;
+            compassEl.style.transform = `rotate(${compassRotation}deg)`;
+            document.querySelectorAll('.direction-point').forEach(element => {
+                element.style.transform = `translate(-50%, -50%) rotate(${-compassRotation}deg)`;
+            });
+        }
+
+        function getAngleFromEvent(event) {
+            const rect = compassEl.getBoundingClientRect();
+            const clientX = event.touches ? event.touches[0].clientX : event.clientX;
+            const clientY = event.touches ? event.touches[0].clientY : event.clientY;
+            return Math.atan2(clientY - (rect.top + rect.height / 2),
+                              clientX - (rect.left + rect.width / 2)) * 180 / Math.PI;
+        }
+
+        function startDrag(event) {
+            if (gyroMode || (event.button !== undefined && event.button !== 0) ||
+                (event.touches && event.touches.length !== 1)) return;
+            clearTimeout(dragResetTimer);
+            isDragging = true;
+            hasDragged = false;
+            dragTravel = 0;
+            previousDragAngle = getAngleFromEvent(event);
+        }
+
+        function drag(event) {
+            if (!isDragging || gyroMode || (event.touches && event.touches.length !== 1)) return;
+            if (event.cancelable) event.preventDefault();
+            const currentAngle = getAngleFromEvent(event);
+            // Use an incremental, wrapped delta to avoid a jump across +/-180 degrees.
+            const delta = ((currentAngle - previousDragAngle + 540) % 360) - 180;
+            previousDragAngle = currentAngle;
+            dragTravel += Math.abs(delta);
+            if (dragTravel > 3) hasDragged = true;
+            updateRotation(compassRotation + delta);
+        }
+
+        function endDrag() {
+            if (!isDragging) return;
+            isDragging = false;
+            clearTimeout(dragResetTimer);
+            dragResetTimer = setTimeout(() => { hasDragged = false; }, 100);
+        }
+
+        compassEl.addEventListener('mousedown', startDrag);
+        compassEl.addEventListener('touchstart', startDrag, { passive: true });
+        window.addEventListener('mousemove', drag);
+        window.addEventListener('touchmove', drag, { passive: false });
+        window.addEventListener('mouseup', endDrag);
+        window.addEventListener('touchend', endDrag);
+        window.addEventListener('touchcancel', endDrag);
+        window.addEventListener('blur', endDrag);
+
+        function disableGyro() {
+            gyroMode = false;
+            clearTimeout(gyroReadTimer);
+            window.removeEventListener('deviceorientation', handleOrientation);
+            window.removeEventListener('deviceorientationabsolute', handleOrientation);
+            gyroBtn.textContent = '手動 (Manual)';
+            gyroBtn.classList.replace('bg-purple-500', 'bg-gray-500');
+            gyroBtn.setAttribute('aria-pressed', 'false');
+            updateRotation(0);
+        }
+
+        function handleOrientation(event) {
+            if (!gyroMode) return;
+            let heading;
+            if (Number.isFinite(event.webkitCompassHeading)) {
+                heading = event.webkitCompassHeading;
+            } else if ((event.absolute === true || event.type === 'deviceorientationabsolute') &&
+                       Number.isFinite(event.alpha)) {
+                heading = 360 - event.alpha;
+            } else {
+                return; // Relative orientation is NOT a reliable north bearing.
+            }
+            gyroHasReading = true;
+            clearTimeout(gyroReadTimer);
+            updateRotation(-heading);
+        }
+
+        gyroBtn.addEventListener('click', async () => {
+            if (gyroMode) {
+                disableGyro();
+                return;
+            }
+            if (!('ondeviceorientation' in window) && !('ondeviceorientationabsolute' in window)) {
+                showToast('此瀏覽器不支持裝置方向感應');
+                return;
+            }
+            if (typeof DeviceOrientationEvent !== 'undefined' &&
+                typeof DeviceOrientationEvent.requestPermission === 'function') {
+                try {
+                    // iOS requires this request inside a user click.
+                    const permission = await DeviceOrientationEvent.requestPermission();
+                    if (permission !== 'granted') {
+                        showToast('沒有裝置方向感應權限');
+                        return;
+                    }
+                } catch (err) {
+                    console.warn('Orientation permission error:', err);
+                    showToast('無法啟用裝置方向感應');
+                    return;
+                }
+            }
+            gyroMode = true;
+            gyroHasReading = false;
+            gyroBtn.textContent = '陀螺儀 (Gyro)';
+            gyroBtn.classList.replace('bg-gray-500', 'bg-purple-500');
+            gyroBtn.setAttribute('aria-pressed', 'true');
+            // Both listeners are safe; only usable north-referenced readings are applied.
+            window.addEventListener('deviceorientationabsolute', handleOrientation);
+            window.addEventListener('deviceorientation', handleOrientation);
+            gyroReadTimer = setTimeout(() => {
+                if (gyroMode && !gyroHasReading) {
+                    disableGyro();
+                    showToast('無法取得羅盤方向，已返回手動模式');
+                }
+            }, 3500);
+            showToast('已啟用裝置方向（精度取決於裝置校準）');
+        });
+
+        function showToast(message) {
+            const toast = document.getElementById('toast');
+            toast.textContent = message;
+            toast.classList.add('show');
+            clearTimeout(toastTimer);
+            toastTimer = setTimeout(() => toast.classList.remove('show'), 2500);
+        }
+
+        function updateVoiceBtnUI() {
+            voiceBtn.textContent = voiceMode ? 'ON' : 'OFF';
+            voiceBtn.classList.toggle('bg-green-500', voiceMode);
+            voiceBtn.classList.toggle('hover:bg-green-600', voiceMode);
+            voiceBtn.classList.toggle('bg-gray-500', !voiceMode);
+            voiceBtn.classList.toggle('hover:bg-gray-600', !voiceMode);
+            voiceBtn.setAttribute('aria-pressed', String(voiceMode));
+            directions.forEach(dir => {
+                const element = document.getElementById(`dir-${dir.id}`);
+                if (element?.classList.contains('hidden-state') &&
+                    !element.classList.contains('listening')) {
+                    setDirectionHidden(dir.id, element);
+                }
+            });
+        }
+
+        voiceBtn.addEventListener('click', () => {
+            if (!recognition) {
+                showToast('此瀏覽器不支持語音識別，可使用手動顯示');
+                return;
+            }
+            cancelVoiceChallenge();
+            voiceMode = !voiceMode;
+            updateVoiceBtnUI();
+            showToast(`語音模式已${voiceMode ? '開啟' : '關閉'}`);
+        });
+
+        document.getElementById('start-btn').addEventListener('click', () => {
+            if (started) return;
+            started = true;
+            const overlay = document.getElementById('start-screen');
+            overlay.style.opacity = '0';
+            // Don't block the game on a camera permission prompt or rejection.
+            initCamera();
+            setTimeout(() => {
+                overlay.style.display = 'none';
+                hideSelectedCount();
+                if (!recognition) showToast('此瀏覽器不支持語音，可直接點擊顯示答案');
+            }, 500);
+        });
+
+        // Stop the camera when navigating away, including when the tab is closed.
+        window.addEventListener('pagehide', () => {
+            const video = document.getElementById('camera-bg');
+            video.srcObject?.getTracks().forEach(track => track.stop());
+        });
+
+        // Script is at the end of <body>; nodes are ready and no network is required.
+        initCompass();
+        updateVoiceBtnUI();
+    </script>
+</body>
+</html>
