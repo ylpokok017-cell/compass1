@@ -557,7 +557,7 @@ svg { display: block; vertical-align: middle; }
         if (recognition) {
             recognition.continuous = false;
             recognition.interimResults = false;
-            recognition.maxAlternatives = 1;
+            recognition.maxAlternatives = 4; // More options if Safari mistakes a word. (May return fewer.)
         }
 
         let voiceMode = Boolean(recognition);
@@ -749,6 +749,42 @@ svg { display: block; vertical-align: middle; }
             return (acceptable[dirId] || []).includes(answer);
         }
 
+        // Safari often converts spoken compass words into similar-sounding Chinese
+        // characters. Be forgiving ONLY with speech, not with typed answers.
+        // This handles Cantonese "南" -> "藍/男", "東" -> "冬", "西" -> "犀",
+        // including combinations like "西藍" -> "西南".
+        // Whole-answer matching still prevents "西" from passing as "西南".
+        function checkSpokenMatch(spokenText, dirId) {
+            if (typeof spokenText !== 'string') return false;
+            if (checkMatch(spokenText, dirId)) return true;
+            const normalized = spokenText
+                .replace(/[藍蓝籃篮男難难]/g, '南')
+                .replace(/[冬]/g, '東')
+                .replace(/[犀]/g, '西');
+            return checkMatch(normalized, dirId);
+        }
+
+        // Prefer the top transcript. Only consult lower alternatives when the
+        // top one isn't any recognizable direction (e.g. a random homophone).
+        // If the top guess is a different valid direction, never silently
+        // override it with a lower-confidence alternative.
+        function getSpokenMatch(results, targetDirId) {
+            const candidates = results ? Array.from(results).map(r => r?.transcript || '') : [];
+            const first = candidates[0] || '';
+            if (checkSpokenMatch(first, targetDirId)) {
+                return { accepted: true, heard: first };
+            }
+            if (directions.some(d => checkSpokenMatch(first, d.id))) {
+                return { accepted: false, heard: first };
+            }
+            for (const candidate of candidates.slice(1)) {
+                if (checkSpokenMatch(candidate, targetDirId)) {
+                    return { accepted: true, heard: candidate };
+                }
+            }
+            return { accepted: false, heard: first };
+        }
+
         function startVoiceChallenge(dirId, element) {
             if (!recognition || activeChallenge) return;
             const challenge = { dirId, element, resolved: false };
@@ -769,9 +805,9 @@ svg { display: block; vertical-align: middle; }
             recognition.onresult = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
-                const transcript = event.results?.[0]?.[0]?.transcript || '';
+                const { accepted, heard: transcript } = getSpokenMatch(event.results?.[0], dirId);
                 element.classList.remove('listening');
-                if (checkMatch(transcript, dirId)) {
+                if (accepted) {
                     element.classList.add('success');
                     setSpeechStatus(`已識別：「${transcript}」— 正確`);
                     showToast(`正確！(${transcript})`);
