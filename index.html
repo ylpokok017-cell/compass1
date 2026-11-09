@@ -223,7 +223,7 @@
         <div class="device-line"><span id="speech-status" role="status">語音：準備中</span></div>
         <div class="divider-title">玩法</div>
         <p class="drawer-hint">點已顯示的方向 → 隱藏；再點一次 → 語音猜答案。旋轉羅盤可用手指拖曳。iPad 語音不穩定時可改用鍵盤回答。</p>
-        <span id="app-version">v5.2 · iPad Speech Diagnostics</span>
+        <span id="app-version">v5.3 · Restored v4.3 Speech Flow</span>
       </div>
     </aside>
   </div>
@@ -381,11 +381,20 @@
         const voiceBtn = document.getElementById('toggle-voice-btn');
         const gyroBtn = document.getElementById('toggle-gyro-btn');
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        // A fresh recognition object for each attempt avoids stale WebKit sessions.
+        // Restore the speech engine lifecycle from v4.3, which was confirmed
+        // working on the user's iPad: one recognizer, reused for each answer.
+        // Creating a fresh SpeechRecognition object for every tap was introduced
+        // during the visual redesign and is not required by the game.
         let recognition = null;
         if (SpeechRecognition) {
-            try { recognition = new SpeechRecognition(); }
-            catch (error) { console.warn('SpeechRecognition unavailable:', error); }
+            try {
+                recognition = new SpeechRecognition();
+                recognition.continuous = false;
+                recognition.interimResults = false;
+                recognition.maxAlternatives = 4;
+            } catch (error) {
+                console.warn('SpeechRecognition unavailable:', error);
+            }
         }
 
         let voiceMode = Boolean(recognition);
@@ -676,28 +685,16 @@
         }
 
         function startVoiceChallenge(dirId, element) {
-            if (!SpeechRecognition || activeChallenge) return;
-            let session;
-            try {
-                // Creating a new instance avoids leaving a dead iPad session alive
-                // after missing onend/onerror notifications.
-                session = new SpeechRecognition();
-                session.continuous = false;
-                session.interimResults = false;
-                session.maxAlternatives = 4;
-                session.lang = document.getElementById('lang-select').value;
-                recognition = session;
-            } catch (err) {
-                console.warn('Cannot create speech recognition:', err);
-                setSpeechStatus(`無法初始化語音：${err?.name || 'unknown'}`);
-                showVoiceHud('語音功能無法初始化，請改用鍵盤', { actions: true, retry: false, target: dirId });
-                return;
-            }
-            const challenge = { dirId, element, recognizer: session, resolved: false };
+            // Called directly in a direction button's click handler. No async
+            // permission request or await may precede recognition.start().
+            if (!recognition || activeChallenge) return;
+
+            const challenge = { dirId, element, recognizer: recognition, resolved: false };
             activeChallenge = challenge;
             isListening = true;
             element.classList.remove('error', 'success');
             element.classList.add('hidden-state', 'listening');
+            recognition.lang = document.getElementById('lang-select').value;
             setSpeechStatus('正在啟動辨識…');
             showVoiceHud('🎤 正在啟動語音…', { listening: true, target: dirId });
 
@@ -706,10 +703,11 @@
                 setSpeechStatus(message);
                 showVoiceHud(message, { listening: true, target: dirId });
             };
-            session.onstart = () => updateIfActive('🎤 已啟動，請講出方向');
-            session.onaudiostart = () => updateIfActive('🎤 咪高峰收音中…請說方向');
-            session.onspeechstart = () => updateIfActive('🎤 偵測到語音，正在辨識…');
-            session.onnomatch = () => {
+            recognition.onstart = () => updateIfActive('🎤 已啟動，請講出方向');
+            recognition.onaudiostart = () => updateIfActive('🎤 咪高峰收音中…請說方向');
+            recognition.onspeechstart = () => updateIfActive('🎤 偵測到語音，正在辨識…');
+
+            recognition.onnomatch = () => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
                 setDirectionHidden(dirId, element);
@@ -717,7 +715,8 @@
                 setSpeechStatus('未能辨識方向，請再試');
                 showVoiceHud('未能辨識方向，可再試或用鍵盤回答', { actions: true, target: dirId });
             };
-            session.onresult = event => {
+
+            recognition.onresult = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
                 const { accepted, heard: transcript, interpreted } = getSpokenMatch(event.results?.[0], dirId);
@@ -745,7 +744,8 @@
                     }, 600);
                 }
             };
-            session.onerror = event => {
+
+            recognition.onerror = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
                 const code = event.error || 'unknown';
@@ -764,10 +764,11 @@
                 };
                 const message = messages[code] || `語音辨識錯誤：${code}`;
                 setSpeechStatus(message);
-                const retryAllowed = !['not-allowed','service-not-allowed'].includes(code);
+                const retryAllowed = !['not-allowed', 'service-not-allowed'].includes(code);
                 showVoiceHud(`${message}，可選擇鍵盤回答`, { actions: true, retry: retryAllowed, target: dirId });
             };
-            session.onend = () => {
+
+            recognition.onend = () => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
                 setDirectionHidden(dirId, element);
@@ -777,24 +778,26 @@
             };
 
             try {
-                // Must be called synchronously in the tap/click handler on iPad Safari.
-                session.start();
-                // Safari can hang without firing result, error OR end after media activity.
+                recognition.start();
+                // v4.3 allowed 18 seconds; v5.2's 9s was a regression for
+                // slower Safari recognition. This timer is a fallback only.
                 voiceWatchdog = setTimeout(() => {
                     if (activeChallenge !== challenge || challenge.resolved) return;
                     challenge.resolved = true;
                     setDirectionHidden(dirId, element);
                     finishChallenge(challenge);
-                    try { session.abort(); } catch (_) {}
-                    setSpeechStatus('Safari 沒有回傳辨識結果（可能與相機影片衝突）');
-                    showVoiceHud('語音沒有回應；可重試，或用鍵盤回答', { actions: true, target: dirId });
-                }, 9000);
+                    try { recognition.abort(); } catch (_) {}
+                    setSpeechStatus('語音服務未回應，請再試或改用鍵盤');
+                    showVoiceHud('語音暫時沒有回應，請再試或用鍵盤回答',
+                        { actions: true, target: dirId });
+                }, 18000);
             } catch (err) {
                 console.warn('Could not start speech recognition:', err);
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
                 setSpeechStatus(`無法啟動語音：${err?.name || 'unknown'}`);
-                showVoiceHud('無法啟動語音，請重試或改用鍵盤回答', { actions: true, target: dirId });
+                showVoiceHud('無法啟動語音，請再試或改用鍵盤回答',
+                    { actions: true, target: dirId });
             }
         }
 
