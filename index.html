@@ -67,6 +67,17 @@
     @keyframes pulse-ring {0%{box-shadow:0 0 0 0 rgba(93,230,255,.58)}80%{box-shadow:0 0 0 13px rgba(93,230,255,0)}100%{box-shadow:0 0 0 0 rgba(93,230,255,0)}}
     @keyframes shake {0%,100%{margin-left:0}25%{margin-left:-4px}75%{margin-left:4px}}
 
+
+    /* Speech feedback is visible without opening settings. Prevent a silent iPad failure. */
+    #voice-hud {position:absolute;left:calc(16px + env(safe-area-inset-left,0px));bottom:calc(16px + var(--safe-bottom));z-index:27;width:min(410px,calc(100vw - 32px));display:flex;flex-wrap:wrap;align-items:center;gap:9px;padding:10px 12px;border:1px solid rgba(140,234,255,.5);border-radius:16px;background:rgba(3,17,36,.94);box-shadow:0 13px 35px rgba(0,0,0,.38);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);pointer-events:auto;}
+    #voice-hud::before {content:"";width:9px;height:9px;flex:none;border-radius:50%;background:#6feeff;box-shadow:0 0 12px #6feeff;}
+    #voice-hud.listening::before {animation:voice-beacon 1.2s ease-in-out infinite;}
+    #voice-hud-message {flex:1 1 205px;font-size:14px;line-height:1.4;font-weight:700;color:#e8faff;}
+    #voice-hud-actions {display:flex;gap:7px;width:100%;flex-wrap:wrap;}
+    #voice-hud button {min-height:38px;padding:7px 12px;border-radius:11px;border:1px solid rgba(126,232,255,.4);background:rgba(28,78,113,.5);font-size:13px;font-weight:750;}
+    @keyframes voice-beacon {50%{opacity:.35;box-shadow:0 0 0 8px rgba(111,238,255,0)}}
+    @media (max-width:700px) {#voice-hud {bottom:calc(9px + var(--safe-bottom));left:10px;width:calc(100vw - 20px);padding:8px 10px;}#voice-hud-message{font-size:12px;}}
+
     /* Drawer is absent from layout unless opened. Width is reserved only while open. */
     .control-drawer {position:absolute;z-index:25;top:calc(76px + var(--safe-top));right:calc(16px + env(safe-area-inset-right,0px));bottom:calc(14px + var(--safe-bottom));width:min(318px,calc(100vw - 32px));padding:17px;overflow-y:auto;overscroll-behavior:contain;border:1px solid rgba(148,237,255,.31);border-radius:22px;background:linear-gradient(160deg,rgba(3,18,35,.94),rgba(6,24,43,.9));box-shadow:0 20px 48px rgba(0,0,0,.4),0 0 27px rgba(30,178,248,.09);backdrop-filter:blur(24px);-webkit-backdrop-filter:blur(24px);pointer-events:auto;}
     .drawer-head {display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:16px;}
@@ -173,6 +184,14 @@
         </div>
       </div>
     </main>
+    <section id="voice-hud" hidden aria-label="語音回答狀態" role="status">
+      <span id="voice-hud-message" aria-live="polite">請說出方向</span>
+      <div id="voice-hud-actions" hidden>
+        <button id="voice-retry-btn" type="button">🎤 再試語音</button>
+        <button id="voice-type-btn" type="button">鍵盤回答</button>
+        <button id="voice-dismiss-btn" type="button">關閉提示</button>
+      </div>
+    </section>
     <aside id="control-drawer" class="control-drawer" hidden aria-hidden="true" aria-label="進階設定">
       <div class="drawer-head">
         <h2>控制中心</h2>
@@ -204,7 +223,7 @@
         <div class="device-line"><span id="speech-status" role="status">語音：準備中</span></div>
         <div class="divider-title">玩法</div>
         <p class="drawer-hint">點已顯示的方向 → 隱藏；再點一次 → 語音猜答案。旋轉羅盤可用手指拖曳。iPad 語音不穩定時可改用鍵盤回答。</p>
-        <span id="app-version">v5.1 · Landscape HUD</span>
+        <span id="app-version">v5.2 · iPad Speech Diagnostics</span>
       </div>
     </aside>
   </div>
@@ -362,11 +381,11 @@
         const voiceBtn = document.getElementById('toggle-voice-btn');
         const gyroBtn = document.getElementById('toggle-gyro-btn');
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        const recognition = SpeechRecognition ? new SpeechRecognition() : null;
-        if (recognition) {
-            recognition.continuous = false;
-            recognition.interimResults = false;
-            recognition.maxAlternatives = 4; // More options if Safari mistakes a word. (May return fewer.)
+        // A fresh recognition object for each attempt avoids stale WebKit sessions.
+        let recognition = null;
+        if (SpeechRecognition) {
+            try { recognition = new SpeechRecognition(); }
+            catch (error) { console.warn('SpeechRecognition unavailable:', error); }
         }
 
         let voiceMode = Boolean(recognition);
@@ -386,6 +405,54 @@
         let gyroReadTimer = null;
         let gyroHasReading = false;
         let started = false;
+
+        const voiceHud = document.getElementById('voice-hud');
+        const voiceHudMessage = document.getElementById('voice-hud-message');
+        const voiceHudActions = document.getElementById('voice-hud-actions');
+        const voiceRetryBtn = document.getElementById('voice-retry-btn');
+        const voiceTypeBtn = document.getElementById('voice-type-btn');
+        const voiceDismissBtn = document.getElementById('voice-dismiss-btn');
+        let voiceHudTarget = null;
+        let voiceHudTimer = null;
+        function showVoiceHud(message, { listening = false, actions = false, retry = true, target = null } = {}) {
+            clearTimeout(voiceHudTimer);
+            voiceHud.hidden = false;
+            voiceHud.classList.toggle('listening', listening);
+            voiceHudMessage.textContent = message;
+            voiceHudActions.hidden = !actions;
+            voiceRetryBtn.hidden = !retry;
+            voiceHudTarget = target;
+        }
+        function hideVoiceHud(delayMs = 0) {
+            clearTimeout(voiceHudTimer);
+            if (delayMs) {
+                voiceHudTimer = setTimeout(() => hideVoiceHud(), delayMs);
+                return;
+            }
+            voiceHud.hidden = true;
+            voiceHud.classList.remove('listening');
+            voiceHudTarget = null;
+        }
+        voiceRetryBtn.addEventListener('click', () => {
+            const target = voiceHudTarget;
+            if (!target || activeChallenge) return;
+            const el = document.getElementById(`dir-${target}`);
+            if (el?.classList.contains('hidden-state')) startVoiceChallenge(target, el);
+            else hideVoiceHud();
+        });
+        voiceTypeBtn.addEventListener('click', () => {
+            const target = voiceHudTarget;
+            cancelVoiceChallenge();
+            hideVoiceHud();
+            voiceMode = false;
+            typeMode = true;
+            updateVoiceBtnUI();
+            setSpeechStatus('鍵盤模式：點隱藏方向輸入答案');
+            if (target && document.getElementById(`dir-${target}`)?.classList.contains('hidden-state')) {
+                openAnswerModal(target);
+            }
+        });
+        voiceDismissBtn.addEventListener('click', () => hideVoiceHud());
 
         function directionById(dirId) {
             return directions.find(d => d.id === dirId);
@@ -431,8 +498,10 @@
         }
 
         function handleDirectionClick(dirId, element) {
-            if (isListening || hasDragged) return;
+            // Tap on a direction is never interpreted as a rotation gesture.
+            if (isListening) return;
             if (element.classList.contains('visible')) {
+                hideVoiceHud();
                 setDirectionHidden(dirId, element);
             } else if (voiceMode && recognition) {
                 startVoiceChallenge(dirId, element);
@@ -462,7 +531,8 @@
             voiceWatchdog = null;
             activeChallenge = null; // Invalidate handlers before aborting recognition.
             isListening = false;
-            try { recognition?.abort(); } catch (err) { console.warn(err); }
+            try { challenge.recognizer?.abort(); } catch (err) { console.warn(err); }
+            hideVoiceHud();
             if (challenge.element.classList.contains('hidden-state')) {
                 setDirectionHidden(challenge.dirId, challenge.element);
             }
@@ -513,6 +583,7 @@
 
         function hideRandomDirections(count) {
             cancelVoiceChallenge();
+            hideVoiceHud();
             revealAll();
             const shuffled = [...directions];
             // Fisher-Yates: unbiased shuffle (unlike Array.sort(() => Math.random() - 0.5)).
@@ -529,6 +600,7 @@
 
         function revealAll() {
             cancelVoiceChallenge();
+            hideVoiceHud();
             directions.forEach(dir => {
                 setDirectionVisible(dir.id, document.getElementById(`dir-${dir.id}`));
             });
@@ -604,54 +676,76 @@
         }
 
         function startVoiceChallenge(dirId, element) {
-            if (!recognition || activeChallenge) return;
-            const challenge = { dirId, element, resolved: false };
+            if (!SpeechRecognition || activeChallenge) return;
+            let session;
+            try {
+                // Creating a new instance avoids leaving a dead iPad session alive
+                // after missing onend/onerror notifications.
+                session = new SpeechRecognition();
+                session.continuous = false;
+                session.interimResults = false;
+                session.maxAlternatives = 4;
+                session.lang = document.getElementById('lang-select').value;
+                recognition = session;
+            } catch (err) {
+                console.warn('Cannot create speech recognition:', err);
+                setSpeechStatus(`無法初始化語音：${err?.name || 'unknown'}`);
+                showVoiceHud('語音功能無法初始化，請改用鍵盤', { actions: true, retry: false, target: dirId });
+                return;
+            }
+            const challenge = { dirId, element, recognizer: session, resolved: false };
             activeChallenge = challenge;
             isListening = true;
             element.classList.remove('error', 'success');
             element.classList.add('hidden-state', 'listening');
-            recognition.lang = document.getElementById('lang-select').value;
             setSpeechStatus('正在啟動辨識…');
-            showToast('請說出方向（聆聽中…）');
-            recognition.onstart = () => {
-                if (activeChallenge === challenge) setSpeechStatus('已啟動，請說出方向');
-            };
-            recognition.onaudiostart = () => {
-                if (activeChallenge === challenge) setSpeechStatus('咪高峰收音中…');
-            };
+            showVoiceHud('🎤 正在啟動語音…', { listening: true, target: dirId });
 
-            recognition.onresult = event => {
+            const updateIfActive = (message) => {
+                if (activeChallenge !== challenge || challenge.resolved) return;
+                setSpeechStatus(message);
+                showVoiceHud(message, { listening: true, target: dirId });
+            };
+            session.onstart = () => updateIfActive('🎤 已啟動，請講出方向');
+            session.onaudiostart = () => updateIfActive('🎤 咪高峰收音中…請說方向');
+            session.onspeechstart = () => updateIfActive('🎤 偵測到語音，正在辨識…');
+            session.onnomatch = () => {
+                if (activeChallenge !== challenge || challenge.resolved) return;
+                challenge.resolved = true;
+                setDirectionHidden(dirId, element);
+                finishChallenge(challenge);
+                setSpeechStatus('未能辨識方向，請再試');
+                showVoiceHud('未能辨識方向，可再試或用鍵盤回答', { actions: true, target: dirId });
+            };
+            session.onresult = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
                 const { accepted, heard: transcript, interpreted } = getSpokenMatch(event.results?.[0], dirId);
-                // Always show the standard direction name when speech maps to one.
-                // For example Safari's "藍" displays "南"; "洗" displays "西".
-                // Only show raw text if no recognizable direction was found.
                 const displayAnswer = interpreted || transcript || '（沒有回答）';
                 element.classList.remove('listening');
                 if (accepted) {
                     element.classList.add('success');
                     const correctDirection = directionById(dirId).name;
                     setSpeechStatus(`答對了！${correctDirection}`);
-                    showToast(`正確！${correctDirection}`);
+                    showVoiceHud(`✅ 答對！${correctDirection}`);
                     challengeTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
                         setDirectionVisible(dirId, element);
                         finishChallenge(challenge);
-                    }, 800);
+                        hideVoiceHud(1200);
+                    }, 700);
                 } else {
                     element.classList.add('error');
-                    setSpeechStatus(`辨識結果：「${displayAnswer}」— 答錯（不符合此方向）`);
-                    showToast(`再試一次，辨識結果：「${displayAnswer}」`);
+                    setSpeechStatus(`辨識結果：「${displayAnswer}」— 答錯`);
+                    showVoiceHud(`辨識成「${displayAnswer}」，可以再試`, { actions: true, target: dirId });
                     challengeTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
                         setDirectionHidden(dirId, element);
                         finishChallenge(challenge);
-                    }, 1000);
+                    }, 600);
                 }
             };
-
-            recognition.onerror = event => {
+            session.onerror = event => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
                 const code = event.error || 'unknown';
@@ -659,65 +753,48 @@
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
                 const messages = {
-                    'not-allowed': '未獲麥克風／語音辨識權限',
-                    'service-not-allowed': '瀏覽器或 Siri 語音服務不允許',
-                    'language-not-supported': '此語言未受辨識服務支援，請試其他語言',
-                    'language-unavailable': '此語言暫時不可用',
-                    'audio-capture': '找不到咪高峰或無法收音',
+                    'not-allowed': '麥克風或語音辨識權限被拒絕',
+                    'service-not-allowed': 'Safari / Siri 語音服務未允許',
+                    'language-not-supported': '辨識服務不支援此語言',
+                    'language-unavailable': '此辨識語言暫時不可用',
+                    'audio-capture': '咪高峰無法收音',
                     'network': '語音服務網絡錯誤',
-                    'no-speech': '未偵測到聲音，請再試一次',
-                    'aborted': '辨識已停止'
+                    'no-speech': '未偵測到聲音，請再試',
+                    'aborted': '語音辨識已停止'
                 };
                 const message = messages[code] || `語音辨識錯誤：${code}`;
-                const hardFailure = ['not-allowed', 'service-not-allowed',
-                    'language-not-supported', 'language-unavailable',
-                    'audio-capture', 'network'].includes(code);
-                if (hardFailure) {
-                    voiceMode = false;
-                    typeMode = true;
-                    updateVoiceBtnUI();
-                    setSpeechStatus(`${message}，已改用鍵盤（Safari 請啟用 Siri）`);
-                    showToast('語音不可用，請輸入方向答案');
-                    openAnswerModal(dirId);
-                } else {
-                    setSpeechStatus(message);
-                    showToast(message);
-                }
+                setSpeechStatus(message);
+                const retryAllowed = !['not-allowed','service-not-allowed'].includes(code);
+                showVoiceHud(`${message}，可選擇鍵盤回答`, { actions: true, retry: retryAllowed, target: dirId });
             };
-
-            recognition.onend = () => {
+            session.onend = () => {
                 if (activeChallenge !== challenge || challenge.resolved) return;
                 challenge.resolved = true;
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
-                setSpeechStatus('沒有聽到回答，請再試一次');
-                showToast('沒有聽到回答，請再試一次');
+                setSpeechStatus('辨識已結束，沒有收到答案');
+                showVoiceHud('沒有聽到答案，可再試或用鍵盤回答', { actions: true, target: dirId });
             };
 
             try {
-                recognition.start();
-                // Some embedded iPad browsers expose the API but never start it.
+                // Must be called synchronously in the tap/click handler on iPad Safari.
+                session.start();
+                // Safari can hang without firing result, error OR end after media activity.
                 voiceWatchdog = setTimeout(() => {
                     if (activeChallenge !== challenge || challenge.resolved) return;
                     challenge.resolved = true;
                     setDirectionHidden(dirId, element);
                     finishChallenge(challenge);
-                    try { recognition.abort(); } catch (_) {}
-                    voiceMode = false;
-                    typeMode = true;
-                    updateVoiceBtnUI();
-                    setSpeechStatus('辨識沒有回應，請改用 Safari 並啟用 Siri；目前可用鍵盤回答');
-                    openAnswerModal(dirId);
-                }, 18000);
+                    try { session.abort(); } catch (_) {}
+                    setSpeechStatus('Safari 沒有回傳辨識結果（可能與相機影片衝突）');
+                    showVoiceHud('語音沒有回應；可重試，或用鍵盤回答', { actions: true, target: dirId });
+                }, 9000);
             } catch (err) {
                 console.warn('Could not start speech recognition:', err);
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
-                voiceMode = false;
-                typeMode = true;
-                updateVoiceBtnUI();
-                setSpeechStatus(`無法啟動辨識：${err?.name || 'unknown'}，改用鍵盤`);
-                openAnswerModal(dirId);
+                setSpeechStatus(`無法啟動語音：${err?.name || 'unknown'}`);
+                showVoiceHud('無法啟動語音，請重試或改用鍵盤回答', { actions: true, target: dirId });
             }
         }
 
@@ -739,6 +816,9 @@
         }
 
         function startDrag(event) {
+            // On iPad, even a tiny finger wobble would otherwise suppress the click
+            // and make speech look broken. Drag only on the compass background.
+            if (event.target.closest?.('.direction-point')) return;
             if (gyroMode || (event.button !== undefined && event.button !== 0) ||
                 (event.touches && event.touches.length !== 1)) return;
             clearTimeout(dragResetTimer);
