@@ -72,7 +72,7 @@
     #voice-hud {position:absolute;left:calc(16px + env(safe-area-inset-left,0px));bottom:calc(16px + var(--safe-bottom));z-index:27;width:min(410px,calc(100vw - 32px));display:flex;flex-wrap:wrap;align-items:center;gap:9px;padding:10px 12px;border:1px solid rgba(140,234,255,.5);border-radius:16px;background:rgba(3,17,36,.94);box-shadow:0 13px 35px rgba(0,0,0,.38);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);pointer-events:auto;}
     #voice-hud::before {content:"";width:9px;height:9px;flex:none;border-radius:50%;background:#6feeff;box-shadow:0 0 12px #6feeff;}
     #voice-hud.listening::before {animation:voice-beacon 1.2s ease-in-out infinite;}
-    #voice-hud-message {flex:1 1 205px;font-size:14px;line-height:1.4;font-weight:700;color:#e8faff;}
+    #voice-hud-message {flex:1 1 205px;font-size:14px;line-height:1.4;font-weight:700;color:#e8faff;overflow-wrap:anywhere;}
     #voice-hud-actions {display:flex;gap:7px;width:100%;flex-wrap:wrap;}
     #voice-hud button {min-height:38px;padding:7px 12px;border-radius:11px;border:1px solid rgba(126,232,255,.4);background:rgba(28,78,113,.5);font-size:13px;font-weight:750;}
     @keyframes voice-beacon {50%{opacity:.35;box-shadow:0 0 0 8px rgba(111,238,255,0)}}
@@ -92,6 +92,7 @@
     .divider-title {font-size:11px;letter-spacing:.17em;font-weight:800;color:#77dff4;margin:10px 0 0;}
     .device-line {display:flex;align-items:center;justify-content:space-between;gap:10px;font-size:12px;color:#b9d7ea;line-height:1.45;}
     .device-line span {overflow-wrap:anywhere;min-width:0;}
+    #speech-trace {white-space:pre-line;}
     .drawer-action {display:flex;gap:8px;flex-wrap:wrap;}
     .drawer-action button {padding:9px 13px;min-height:40px;border-radius:11px;border:1px solid rgba(126,234,255,.25);background:rgba(11,38,62,.88);font-weight:700;font-size:13px;}
     .drawer-hint {margin:6px 0 0;color:#91b9c9;font-size:12px;line-height:1.5;}
@@ -216,14 +217,17 @@
         </div>
         <div class="drawer-action">
           <button id="use-keyboard-btn" type="button">改用鍵盤回答</button>
+          <button id="test-mic-btn" type="button">測試咪高峰</button>
           <button id="retry-camera-btn" type="button" hidden>重試相機</button>
         </div>
         <div class="divider-title">SYSTEM STATUS</div>
         <div class="device-line"><span id="camera-status" role="status">相機：未啟動</span></div>
         <div class="device-line"><span id="speech-status" role="status">語音：準備中</span></div>
+        <div class="device-line"><span id="speech-trace" hidden></span></div>
+        <div class="device-line"><span id="mic-test-status" role="status">收音測試：未開始</span></div>
         <div class="divider-title">玩法</div>
         <p class="drawer-hint">點已顯示的方向 → 隱藏；再點一次 → 語音猜答案。旋轉羅盤可用手指拖曳。iPad 語音不穩定時可改用鍵盤回答。</p>
-        <span id="app-version">v5.3 · Restored v4.3 Speech Flow</span>
+        <span id="app-version">v5.4 · 語音診斷</span>
       </div>
     </aside>
   </div>
@@ -249,6 +253,8 @@
         const cameraStatus = document.getElementById('camera-status');
         const retryCameraBtn = document.getElementById('retry-camera-btn');
         const speechStatus = document.getElementById('speech-status');
+        const speechTrace = document.getElementById('speech-trace');
+        const cameraEnabled = new URLSearchParams(window.location.search).get('camera') !== 'off';
         let cameraStream = null;
         let cameraStarting = false;
         let cameraReadyTimer = null;
@@ -381,28 +387,29 @@
         const voiceBtn = document.getElementById('toggle-voice-btn');
         const gyroBtn = document.getElementById('toggle-gyro-btn');
         const SpeechRecognition = window.SpeechRecognition || window.webkitSpeechRecognition;
-        // Restore the speech engine lifecycle from v4.3, which was confirmed
-        // working on the user's iPad: one recognizer, reused for each answer.
-        // Creating a fresh SpeechRecognition object for every tap was introduced
-        // during the visual redesign and is not required by the game.
-        let recognition = null;
-        if (SpeechRecognition) {
+        function createRecognition() {
+            if (!window.isSecureContext || !SpeechRecognition) return null;
             try {
-                recognition = new SpeechRecognition();
-                recognition.continuous = false;
-                recognition.interimResults = false;
-                recognition.maxAlternatives = 4;
+                const engine = new SpeechRecognition();
+                engine.continuous = false;
+                engine.interimResults = false;
+                engine.maxAlternatives = 4;
+                return engine;
             } catch (error) {
                 console.warn('SpeechRecognition unavailable:', error);
+                return null;
             }
         }
 
-        let voiceMode = Boolean(recognition);
-        let typeMode = !recognition; // Unsupported speech still allows guessing, not just reveal.
-        let voiceWatchdog = null;
-        let isListening = false;
+        let recognition = createRecognition();
+        const speechSupported = Boolean(recognition);
+        const speechUnavailable = window.isSecureContext
+            ? '瀏覽器未提供語音辨識，可用鍵盤回答'
+            : '請用 HTTPS 開啟網頁，可用鍵盤回答';
+        let voiceMode = speechSupported;
+        let typeMode = !speechSupported;
+        let recognitionSession = null;
         let activeChallenge = null;
-        let challengeTimer = null;
         let toastTimer = null;
         let compassRotation = 0;
         let isDragging = false;
@@ -421,8 +428,14 @@
         const voiceRetryBtn = document.getElementById('voice-retry-btn');
         const voiceTypeBtn = document.getElementById('voice-type-btn');
         const voiceDismissBtn = document.getElementById('voice-dismiss-btn');
+        const micTestBtn = document.getElementById('test-mic-btn');
+        const micTestStatus = document.getElementById('mic-test-status');
+        let micTest = null;
         let voiceHudTarget = null;
         let voiceHudTimer = null;
+        function updateVoiceRetry() {
+            voiceRetryBtn.disabled = Boolean(activeChallenge || recognitionSession);
+        }
         function showVoiceHud(message, { listening = false, actions = false, retry = true, target = null } = {}) {
             clearTimeout(voiceHudTimer);
             voiceHud.hidden = false;
@@ -431,6 +444,7 @@
             voiceHudActions.hidden = !actions;
             voiceRetryBtn.hidden = !retry;
             voiceHudTarget = target;
+            updateVoiceRetry();
         }
         function hideVoiceHud(delayMs = 0) {
             clearTimeout(voiceHudTimer);
@@ -452,7 +466,6 @@
         voiceTypeBtn.addEventListener('click', () => {
             const target = voiceHudTarget;
             cancelVoiceChallenge();
-            hideVoiceHud();
             voiceMode = false;
             typeMode = true;
             updateVoiceBtnUI();
@@ -508,11 +521,11 @@
 
         function handleDirectionClick(dirId, element) {
             // Tap on a direction is never interpreted as a rotation gesture.
-            if (isListening) return;
+            if (activeChallenge) return;
             if (element.classList.contains('visible')) {
                 hideVoiceHud();
                 setDirectionHidden(dirId, element);
-            } else if (voiceMode && recognition) {
+            } else if (voiceMode) {
                 startVoiceChallenge(dirId, element);
             } else if (typeMode) {
                 openAnswerModal(dirId);
@@ -523,28 +536,59 @@
 
         function finishChallenge(challenge) {
             if (activeChallenge !== challenge) return;
-            clearTimeout(challengeTimer);
-            clearTimeout(voiceWatchdog);
-            challengeTimer = null;
-            voiceWatchdog = null;
+            clearTimeout(challenge.feedbackTimer);
+            clearTimeout(challenge.watchdog);
             activeChallenge = null;
-            isListening = false;
+            updateVoiceRetry();
+        }
+
+        function recordSpeechEvent(challenge, name) {
+            challenge.events.push(name);
+            speechTrace.hidden = false;
+            speechTrace.textContent = `${challenge.lang} · ${challenge.events.join(' → ')}` +
+                (challenge.transcript === null ? '' : `\n逐字稿：「${challenge.transcript || '（空白）'}」`);
+        }
+
+        function releaseRecognition(challenge, discard = false) {
+            if (recognitionSession !== challenge) return;
+            clearTimeout(challenge.endTimer);
+            recognitionSession = null;
+            if (discard) recognition = null;
+            updateVoiceRetry();
+        }
+
+        function abortRecognition(challenge) {
+            if (challenge.aborted) return;
+            challenge.aborted = true;
+            recordSpeechEvent(challenge, 'abort()');
+            try { challenge.recognizer.abort(); } catch (error) {
+                console.warn('Could not stop speech recognition:', error);
+            }
+        }
+
+        function waitForRecognitionEnd(challenge) {
+            if (recognitionSession !== challenge || challenge.endTimer !== null) return;
+            // Reuse the engine after end. Retire it if the browser never closes this session.
+            challenge.endTimer = setTimeout(() => {
+                recordSpeechEvent(challenge, 'end timeout');
+                releaseRecognition(challenge, true);
+                abortRecognition(challenge);
+            }, 1500);
         }
 
         function cancelVoiceChallenge() {
             const challenge = activeChallenge;
-            if (!challenge) return;
-            clearTimeout(challengeTimer);
-            clearTimeout(voiceWatchdog);
-            challengeTimer = null;
-            voiceWatchdog = null;
-            activeChallenge = null; // Invalidate handlers before aborting recognition.
-            isListening = false;
-            try { challenge.recognizer?.abort(); } catch (err) { console.warn(err); }
-            hideVoiceHud();
-            if (challenge.element.classList.contains('hidden-state')) {
-                setDirectionHidden(challenge.dirId, challenge.element);
+            if (challenge) {
+                finishChallenge(challenge);
+                if (challenge.element.classList.contains('hidden-state')) {
+                    setDirectionHidden(challenge.dirId, challenge.element);
+                }
             }
+            if (recognitionSession) {
+                waitForRecognitionEnd(recognitionSession);
+                abortRecognition(recognitionSession);
+            }
+            hideVoiceHud();
         }
 
         let typedDirectionId = null;
@@ -591,8 +635,6 @@
         });
 
         function hideRandomDirections(count) {
-            cancelVoiceChallenge();
-            hideVoiceHud();
             revealAll();
             const shuffled = [...directions];
             // Fisher-Yates: unbiased shuffle (unlike Array.sort(() => Math.random() - 0.5)).
@@ -609,7 +651,6 @@
 
         function revealAll() {
             cancelVoiceChallenge();
-            hideVoiceHud();
             directions.forEach(dir => {
                 setDirectionVisible(dir.id, document.getElementById(`dir-${dir.id}`));
             });
@@ -672,62 +713,100 @@
             const firstId = spokenDirectionId(first);
             if (firstId) {
                 return { accepted: firstId === targetDirId,
-                    heard: first, interpreted: directionById(firstId).name };
+                    interpreted: directionById(firstId).name };
             }
             for (const candidate of candidates.slice(1)) {
                 const candidateId = spokenDirectionId(candidate);
                 if (candidateId === targetDirId) {
-                    return { accepted: true, heard: candidate,
-                        interpreted: directionById(candidateId).name };
+                    return { accepted: true, interpreted: directionById(candidateId).name };
                 }
             }
-            return { accepted: false, heard: first, interpreted: null };
+            return { accepted: false, interpreted: null };
         }
 
         function startVoiceChallenge(dirId, element) {
             // Called directly in a direction button's click handler. No async
             // permission request or await may precede recognition.start().
-            if (!recognition || activeChallenge) return;
+            if (!speechSupported || activeChallenge) return;
+            if (micTest || recognitionSession) {
+                showToast(micTest ? '請先結束收音測試' : '上一輪語音正在結束，請稍後再點');
+                return;
+            }
+            if (!recognition) recognition = createRecognition();
+            if (!recognition) {
+                const message = '無法建立語音服務，可重試或用鍵盤回答';
+                setSpeechStatus(message);
+                showVoiceHud(message, { actions: true, target: dirId });
+                return;
+            }
 
-            const challenge = { dirId, element, recognizer: recognition, resolved: false };
+            const engine = recognition;
+            const lang = document.getElementById('lang-select').value;
+            const challenge = { dirId, element, recognizer: engine, lang,
+                resolved: false, stage: 0, events: [], transcript: null, endTimer: null };
             activeChallenge = challenge;
-            isListening = true;
+            recognitionSession = challenge;
             element.classList.remove('error', 'success');
             element.classList.add('hidden-state', 'listening');
-            recognition.lang = document.getElementById('lang-select').value;
             setSpeechStatus('正在啟動辨識…');
             showVoiceHud('🎤 正在啟動語音…', { listening: true, target: dirId });
 
-            const updateIfActive = (message) => {
-                if (activeChallenge !== challenge || challenge.resolved) return;
-                setSpeechStatus(message);
-                showVoiceHud(message, { listening: true, target: dirId });
+            const isActive = () => activeChallenge === challenge && !challenge.resolved;
+            const record = name => {
+                if (recognitionSession !== challenge) return false;
+                recordSpeechEvent(challenge, name);
+                return true;
             };
-            recognition.onstart = () => updateIfActive('🎤 已啟動，請講出方向');
-            recognition.onaudiostart = () => updateIfActive('🎤 咪高峰收音中…請說方向');
-            recognition.onspeechstart = () => updateIfActive('🎤 偵測到語音，正在辨識…');
-
-            recognition.onnomatch = () => {
-                if (activeChallenge !== challenge || challenge.resolved) return;
+            const fail = (message, retry = true) => {
+                if (!isActive()) return;
                 challenge.resolved = true;
                 setDirectionHidden(dirId, element);
                 finishChallenge(challenge);
-                setSpeechStatus('未能辨識方向，請再試');
-                showVoiceHud('未能辨識方向，可再試或用鍵盤回答', { actions: true, target: dirId });
+                waitForRecognitionEnd(challenge);
+                setSpeechStatus(message);
+                showVoiceHud(message, { actions: true, retry, target: dirId });
+            };
+            const updateStage = (name, stage, message) => {
+                if (!record(name) || !isActive() || stage <= challenge.stage) return;
+                challenge.stage = stage;
+                setSpeechStatus(message);
+                showVoiceHud(message, { listening: true, target: dirId });
+            };
+            const noResultMessage = () => [
+                '未收到語音啟動或收音事件',
+                '辨識服務已啟動，未收到收音事件',
+                '已開始收音，未收到逐字稿',
+                '偵測到聲音，未收到逐字稿',
+                '偵測到語音，未收到逐字稿'
+            ][challenge.stage];
+
+            engine.onstart = () => updateStage('start', 1, '🎤 辨識服務已啟動，請講出方向');
+            engine.onaudiostart = () => updateStage('audiostart', 2, '🎤 咪高峰開始收音，請講出方向');
+            engine.onsoundstart = () => updateStage('soundstart', 3, '🎤 偵測到聲音，請講出方向');
+            engine.onspeechstart = () => updateStage('speechstart', 4, '🎤 偵測到語音，正在辨識…');
+            engine.onspeechend = () => record('speechend');
+            engine.onaudioend = () => record('audioend');
+            engine.onnomatch = () => {
+                if (record('nomatch')) fail('辨識服務未能轉成文字（nomatch）');
             };
 
-            recognition.onresult = event => {
-                if (activeChallenge !== challenge || challenge.resolved) return;
+            engine.onresult = event => {
+                if (recognitionSession !== challenge || !isActive()) return;
+                const result = event.results?.[event.resultIndex ?? 0];
+                if (result?.isFinal === false) return;
+                challenge.transcript = result?.[0]?.transcript || '';
+                record('result');
                 challenge.resolved = true;
-                const { accepted, heard: transcript, interpreted } = getSpokenMatch(event.results?.[0], dirId);
-                const displayAnswer = interpreted || transcript || '（沒有回答）';
+                clearTimeout(challenge.watchdog);
+                waitForRecognitionEnd(challenge);
+                const { accepted, interpreted } = getSpokenMatch(result, dirId);
                 element.classList.remove('listening');
                 if (accepted) {
                     element.classList.add('success');
                     const correctDirection = directionById(dirId).name;
                     setSpeechStatus(`答對了！${correctDirection}`);
                     showVoiceHud(`✅ 答對！${correctDirection}`);
-                    challengeTimer = setTimeout(() => {
+                    challenge.feedbackTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
                         setDirectionVisible(dirId, element);
                         finishChallenge(challenge);
@@ -735,9 +814,13 @@
                     }, 700);
                 } else {
                     element.classList.add('error');
-                    setSpeechStatus(`辨識結果：「${displayAnswer}」— 答錯`);
-                    showVoiceHud(`辨識成「${displayAnswer}」，可以再試`, { actions: true, target: dirId });
-                    challengeTimer = setTimeout(() => {
+                    const transcript = challenge.transcript;
+                    const message = !transcript ? '辨識服務回傳空白逐字稿'
+                        : interpreted ? `辨識成「${transcript}」，答案不符`
+                        : `辨識成「${transcript}」，無法對應方向`;
+                    setSpeechStatus(message);
+                    showVoiceHud(message, { actions: true, target: dirId });
+                    challenge.feedbackTimer = setTimeout(() => {
                         if (activeChallenge !== challenge) return;
                         setDirectionHidden(dirId, element);
                         finishChallenge(challenge);
@@ -745,61 +828,134 @@
                 }
             };
 
-            recognition.onerror = event => {
-                if (activeChallenge !== challenge || challenge.resolved) return;
-                challenge.resolved = true;
+            engine.onerror = event => {
                 const code = event.error || 'unknown';
+                if (!record(`error: ${code}`)) return;
                 console.warn('Speech recognition error:', code, event.message || '');
-                setDirectionHidden(dirId, element);
-                finishChallenge(challenge);
                 const messages = {
-                    'not-allowed': '麥克風或語音辨識權限被拒絕',
-                    'service-not-allowed': 'Safari / Siri 語音服務未允許',
+                    'not-allowed': '瀏覽器未允許使用咪高峰或語音辨識',
+                    'service-not-allowed': '瀏覽器未允許使用語音服務',
                     'language-not-supported': '辨識服務不支援此語言',
                     'language-unavailable': '此辨識語言暫時不可用',
-                    'audio-capture': '咪高峰無法收音',
+                    'audio-capture': '語音服務無法擷取咪高峰音訊',
                     'network': '語音服務網絡錯誤',
-                    'no-speech': '未偵測到聲音，請再試',
+                    'no-speech': '辨識服務未偵測到語音',
                     'aborted': '語音辨識已停止'
                 };
-                const message = messages[code] || `語音辨識錯誤：${code}`;
-                setSpeechStatus(message);
-                const retryAllowed = !['not-allowed', 'service-not-allowed'].includes(code);
-                showVoiceHud(`${message}，可選擇鍵盤回答`, { actions: true, retry: retryAllowed, target: dirId });
+                const message = messages[code] || '語音辨識錯誤';
+                fail(`${message}（${code}）`, !['not-allowed', 'service-not-allowed'].includes(code));
             };
 
-            recognition.onend = () => {
-                if (activeChallenge !== challenge || challenge.resolved) return;
-                challenge.resolved = true;
-                setDirectionHidden(dirId, element);
-                finishChallenge(challenge);
-                setSpeechStatus('辨識已結束，沒有收到答案');
-                showVoiceHud('沒有聽到答案，可再試或用鍵盤回答', { actions: true, target: dirId });
+            engine.onend = () => {
+                if (!record('end')) return;
+                releaseRecognition(challenge);
+                fail(`${noResultMessage()}（已結束）`);
             };
 
+            challenge.watchdog = setTimeout(() => {
+                if (!isActive()) return;
+                record('timeout');
+                fail(`${noResultMessage()}（逾時）`);
+                abortRecognition(challenge);
+            }, 18000);
             try {
-                recognition.start();
-                // v4.3 allowed 18 seconds; v5.2's 9s was a regression for
-                // slower Safari recognition. This timer is a fallback only.
-                voiceWatchdog = setTimeout(() => {
-                    if (activeChallenge !== challenge || challenge.resolved) return;
-                    challenge.resolved = true;
-                    setDirectionHidden(dirId, element);
-                    finishChallenge(challenge);
-                    try { recognition.abort(); } catch (_) {}
-                    setSpeechStatus('語音服務未回應，請再試或改用鍵盤');
-                    showVoiceHud('語音暫時沒有回應，請再試或用鍵盤回答',
-                        { actions: true, target: dirId });
-                }, 18000);
+                engine.lang = lang;
+                record('start()');
+                engine.start();
             } catch (err) {
                 console.warn('Could not start speech recognition:', err);
-                setDirectionHidden(dirId, element);
-                finishChallenge(challenge);
-                setSpeechStatus(`無法啟動語音：${err?.name || 'unknown'}`);
-                showVoiceHud('無法啟動語音，請再試或改用鍵盤回答',
-                    { actions: true, target: dirId });
+                const code = err?.name || 'unknown';
+                record(`start exception: ${code}`);
+                releaseRecognition(challenge, true);
+                if (code === 'InvalidStateError') abortRecognition(challenge);
+                fail(`無法啟動語音（${code}）`);
             }
         }
+
+        function setMicTestStatus(message) {
+            micTestStatus.textContent = `收音測試：${message}`;
+        }
+
+        function stopMicTest(test, message) {
+            if (!test || micTest !== test) return;
+            micTest = null;
+            clearTimeout(test.timer);
+            if (test.frame !== undefined) cancelAnimationFrame(test.frame);
+            test.stream?.getTracks().forEach(track => track.stop());
+            test.context?.close().catch(() => {});
+            micTestBtn.textContent = '測試咪高峰';
+            setMicTestStatus(message);
+        }
+
+        micTestBtn.addEventListener('click', async () => {
+            if (micTest) {
+                stopMicTest(micTest, '已停止');
+                return;
+            }
+            if (activeChallenge || recognitionSession) {
+                setMicTestStatus('請等這一輪語音回答結束');
+                return;
+            }
+            const AudioContext = window.AudioContext || window.webkitAudioContext;
+            if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia || !AudioContext) {
+                setMicTestStatus('需要 HTTPS 和支援咪高峰收音的瀏覽器');
+                return;
+            }
+
+            const test = {};
+            micTest = test;
+            micTestBtn.textContent = '停止測試';
+            setMicTestStatus('正在開啟咪高峰，請允許瀏覽器使用');
+            test.timer = setTimeout(() => stopMicTest(test, '咪高峰或音量分析啟動逾時'), 15000);
+            try {
+                test.context = new AudioContext();
+                // Resume from the tap so Safari can start Web Audio while permission is pending.
+                const audioReady = test.context.resume();
+                const capture = navigator.mediaDevices.getUserMedia({ audio: true, video: false }).then(stream => {
+                    if (micTest === test) test.stream = stream;
+                    else stream.getTracks().forEach(track => track.stop());
+                });
+                await Promise.all([audioReady, capture]);
+                if (micTest !== test) return;
+                clearTimeout(test.timer);
+
+                const analyser = test.context.createAnalyser();
+                test.context.createMediaStreamSource(test.stream).connect(analyser);
+                const samples = new Float32Array(analyser.fftSize);
+                let peakRms = 0;
+                const measure = () => {
+                    if (micTest !== test) return;
+                    analyser.getFloatTimeDomainData(samples);
+                    let sum = 0;
+                    for (const sample of samples) sum += sample * sample;
+                    peakRms = Math.max(peakRms, Math.sqrt(sum / samples.length));
+                    test.frame = requestAnimationFrame(measure);
+                };
+
+                setMicTestStatus('請對着咪高峰講一句話（4 秒）');
+                measure();
+                test.timer = setTimeout(() => {
+                    if (test.context.state !== 'running') {
+                        stopMicTest(test, '音量分析中斷，請再試');
+                        return;
+                    }
+                    const level = peakRms > 0 ? `${Math.round(20 * Math.log10(peakRms))} dBFS` : '靜音';
+                    const result = peakRms >= 0.01 ? '有收到音訊' : '音量偏低或沒有訊號';
+                    stopMicTest(test, `${result}（最高音量 ${level}）`);
+                }, 4000);
+                test.stream.getAudioTracks()[0]?.addEventListener('ended', () => {
+                    stopMicTest(test, '咪高峰已中斷，請再試');
+                }, { once: true });
+            } catch (error) {
+                const code = error?.name || 'unknown';
+                const messages = {
+                    NotAllowedError: '瀏覽器未允許咪高峰收音',
+                    NotFoundError: '找不到可用的咪高峰',
+                    NotReadableError: '瀏覽器無法讀取咪高峰'
+                };
+                stopMicTest(test, `${messages[code] || '無法測試咪高峰'}（${code}）`);
+            }
+        });
 
         function updateRotation(angle) {
             if (!Number.isFinite(angle)) return;
@@ -961,9 +1117,9 @@
 
         voiceBtn.addEventListener('click', () => {
             cancelVoiceChallenge();
-            if (!recognition) {
+            if (!speechSupported) {
                 typeMode = !typeMode;
-                setSpeechStatus(typeMode ? '此瀏覽器不支援語音，改為鍵盤回答' : '手動顯示答案');
+                setSpeechStatus(typeMode ? speechUnavailable : '手動顯示答案');
             } else if (voiceMode) {
                 voiceMode = false;
                 typeMode = false;
@@ -982,18 +1138,22 @@
             const overlay = document.getElementById('start-screen');
             overlay.style.opacity = '0';
             // Don't block the game on a camera permission prompt or rejection.
-            initCamera();
+            if (cameraEnabled) initCamera();
+            else setCameraStatus('已停用（語音測試）');
             setTimeout(() => {
                 overlay.style.display = 'none';
                 hideSelectedCount();
-                if (!recognition) showToast('此瀏覽器不支援語音，已切換鍵盤回答');
+                if (!speechSupported) showToast(speechUnavailable);
             }, 500);
         });
 
-        // Stop the camera when navigating away, including when the tab is closed.
-        window.addEventListener('pagehide', stopCamera);
+        window.addEventListener('pagehide', () => {
+            cancelVoiceChallenge();
+            stopMicTest(micTest, '已停止');
+            stopCamera();
+        });
         window.addEventListener('pageshow', event => {
-            if (event.persisted && started) setCameraStatus('頁面已恢復，請按重試', true);
+            if (event.persisted && started && cameraEnabled) setCameraStatus('頁面已恢復，請按重試', true);
         });
 
         // iPad landscape: optional controls are off the playfield, and can be folded away.
@@ -1040,9 +1200,9 @@
         // Script is at the end of <body>; nodes are ready and no network is required.
         initCompass();
         updateVoiceBtnUI();
-        setSpeechStatus(recognition
-            ? '已支援，點隱藏方向開始（iPad Safari 需啟用 Siri）'
-            : '此瀏覽器未提供辨識功能，可用鍵盤回答');
+        setSpeechStatus(speechSupported
+            ? '語音模式已開，請點隱藏方向上的咪高峰'
+            : speechUnavailable);
     </script>
 </body>
 </html>
